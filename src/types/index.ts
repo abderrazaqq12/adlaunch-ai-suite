@@ -18,6 +18,104 @@ export type AssetStatus =
   | 'RISKY'
   | 'APPROVED';
 
+// ============================================
+// CAMPAIGN INTENT SYSTEM
+// ============================================
+
+// High-level objectives (platform-agnostic)
+export type CampaignObjective = 'conversion' | 'video_views';
+
+// Platform-specific objective mappings
+export const PLATFORM_OBJECTIVE_NAMES: Record<Platform, Record<CampaignObjective, string>> = {
+  google: {
+    conversion: 'Sales / Website Conversions',
+    video_views: 'Video Engagement',
+  },
+  tiktok: {
+    conversion: 'Conversion',
+    video_views: 'Video Views',
+  },
+  snapchat: {
+    conversion: 'Conversion',
+    video_views: 'Video Views',
+  },
+};
+
+// Google Ads specific - only Demand Gen
+export type GoogleCampaignType = 'demand_gen';
+
+// Platform-specific configurations
+export interface GoogleAdsConfig {
+  campaignType: GoogleCampaignType;
+  conversionAction?: string;
+}
+
+export interface TikTokAdsConfig {
+  optimizationEvent?: string;
+}
+
+export interface SnapchatAdsConfig {
+  pixelId?: string;
+  conversionEvent?: string;
+}
+
+export type PlatformConfig = {
+  google?: GoogleAdsConfig;
+  tiktok?: TikTokAdsConfig;
+  snapchat?: SnapchatAdsConfig;
+};
+
+// Audience targeting
+export interface AudienceTarget {
+  countries: string[];
+  ageMin: number;
+  ageMax: number;
+  gender: 'all' | 'male' | 'female';
+}
+
+// Selected accounts per platform
+export interface PlatformAccountSelection {
+  platform: Platform;
+  accountIds: string[];
+}
+
+// Campaign Intent - the logical container
+export interface CampaignIntent {
+  id: string;
+  projectId: string;
+  name: string;
+  objective: CampaignObjective;
+  
+  // Selected assets
+  assetIds: string[];
+  landingPageUrl: string;
+  
+  // Audience
+  audience: AudienceTarget;
+  
+  // Platform & account selection
+  selectedPlatforms: Platform[];
+  accountSelections: PlatformAccountSelection[];
+  
+  // Platform-specific configs
+  platformConfigs: PlatformConfig;
+  
+  // Budget
+  dailyBudget: number;
+  
+  // Settings
+  softLaunch: boolean;
+  
+  // Metadata
+  status: 'draft' | 'launching' | 'launched' | 'failed';
+  createdAt: string;
+  launchedAt?: string;
+}
+
+// ============================================
+// EXISTING TYPES (UPDATED)
+// ============================================
+
 export interface PlatformPermissions {
   canAnalyze: boolean;
   canLaunch: boolean;
@@ -87,14 +185,17 @@ export interface FlaggedIssue {
   platform: Platform;
 }
 
+// Real platform campaign (created from CampaignIntent)
 export interface Campaign {
   id: string;
   projectId: string;
+  intentId: string; // Reference to CampaignIntent
   name: string;
   platform: Platform;
+  accountId: string; // Which ad account this runs on
   status: 'draft' | 'pending' | 'active' | 'paused' | 'completed' | 'disapproved';
   budget: number;
-  objective: 'CPC' | 'CPA' | 'ROAS';
+  objective: CampaignObjective;
   softLaunch: boolean;
   metrics: CampaignMetrics;
   approvalStatus: 'pending' | 'approved' | 'disapproved' | 'limited';
@@ -181,3 +282,19 @@ export const PAGE_REQUIRED_STAGES: Record<string, ProjectStage[]> = {
   '/rules': ['ACCOUNTS_CONNECTED'],
   '/history': ['SETUP'],
 };
+
+// ============================================
+// HELPER FUNCTIONS
+// ============================================
+
+export function getAccountsForPlatform(connections: AdAccountConnection[], platform: Platform): AdAccountConnection[] {
+  return connections.filter(c => c.platform === platform && (c.status === 'connected' || c.status === 'limited_access'));
+}
+
+export function getLaunchableAccountsForPlatform(connections: AdAccountConnection[], platform: Platform): AdAccountConnection[] {
+  return connections.filter(c => c.platform === platform && c.permissions.canLaunch);
+}
+
+export function calculateTotalCampaigns(accountSelections: PlatformAccountSelection[]): number {
+  return accountSelections.reduce((total, sel) => total + sel.accountIds.length, 0);
+}

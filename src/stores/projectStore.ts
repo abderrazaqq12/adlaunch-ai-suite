@@ -10,6 +10,8 @@ import type {
   ProjectStage,
   AssetStatus,
   AssetAnalysisResult,
+  CampaignIntent,
+  Platform,
 } from '@/types';
 
 interface ProjectState {
@@ -19,6 +21,7 @@ interface ProjectState {
   assets: Asset[];
   campaigns: Campaign[];
   rules: AutomationRule[];
+  campaignIntents: CampaignIntent[];
   
   // Auth actions
   setUser: (user: User | null) => void;
@@ -32,12 +35,19 @@ interface ProjectState {
   // Connection actions
   addConnection: (projectId: string, connection: AdAccountConnection) => void;
   updateConnection: (projectId: string, connectionId: string, updates: Partial<AdAccountConnection>) => void;
+  removeConnection: (projectId: string, connectionId: string) => void;
+  getAccountsForPlatform: (projectId: string, platform: Platform) => AdAccountConnection[];
   
   // Asset actions
   addAsset: (asset: Asset) => void;
   removeAsset: (id: string) => void;
   updateAsset: (id: string, updates: Partial<Asset>) => void;
   updateAssetStatus: (id: string, status: AssetStatus, analysisResult?: AssetAnalysisResult) => void;
+  
+  // Campaign Intent actions
+  addCampaignIntent: (intent: CampaignIntent) => void;
+  updateCampaignIntent: (id: string, updates: Partial<CampaignIntent>) => void;
+  removeCampaignIntent: (id: string) => void;
   
   // Campaign actions
   addCampaign: (campaign: Campaign) => void;
@@ -80,6 +90,7 @@ export const useProjectStore = create<ProjectState>()(
       assets: [],
       campaigns: [],
       rules: [],
+      campaignIntents: [],
       
       setUser: (user) => set({ user }),
       
@@ -115,7 +126,6 @@ export const useProjectStore = create<ProjectState>()(
             ? { ...state.currentProject, connections: [...state.currentProject.connections, connection] }
             : state.currentProject,
         }));
-        // Recalculate stage after adding connection
         get().recalculateProjectStage(projectId);
       },
       
@@ -139,11 +149,33 @@ export const useProjectStore = create<ProjectState>()(
             }
           : state.currentProject,
       })),
+
+      removeConnection: (projectId, connectionId) => {
+        set((state) => ({
+          projects: state.projects.map((p) =>
+            p.id === projectId
+              ? { ...p, connections: p.connections.filter(c => c.id !== connectionId) }
+              : p
+          ),
+          currentProject: state.currentProject?.id === projectId
+            ? { ...state.currentProject, connections: state.currentProject.connections.filter(c => c.id !== connectionId) }
+            : state.currentProject,
+        }));
+        get().recalculateProjectStage(projectId);
+      },
+
+      getAccountsForPlatform: (projectId, platform) => {
+        const state = get();
+        const project = state.projects.find(p => p.id === projectId);
+        if (!project) return [];
+        return project.connections.filter(
+          c => c.platform === platform && (c.status === 'connected' || c.status === 'limited_access')
+        );
+      },
       
       addAsset: (asset) => {
         const assetWithStatus: Asset = { ...asset, status: 'UPLOADED' };
         set((state) => ({ assets: [...state.assets, assetWithStatus] }));
-        // Recalculate stage after adding asset
         if (asset.projectId) {
           get().recalculateProjectStage(asset.projectId);
         }
@@ -155,7 +187,6 @@ export const useProjectStore = create<ProjectState>()(
         set((state) => ({
           assets: state.assets.filter((a) => a.id !== id),
         }));
-        // Recalculate stage after removing asset
         if (asset?.projectId) {
           get().recalculateProjectStage(asset.projectId);
         }
@@ -173,18 +204,29 @@ export const useProjectStore = create<ProjectState>()(
               : a
           ),
         }));
-        // Recalculate stage after updating asset status
         const asset = get().assets.find(a => a.id === id);
         if (asset?.projectId) {
           get().recalculateProjectStage(asset.projectId);
         }
       },
+
+      // Campaign Intent actions
+      addCampaignIntent: (intent) => set((state) => ({
+        campaignIntents: [...state.campaignIntents, intent],
+      })),
+
+      updateCampaignIntent: (id, updates) => set((state) => ({
+        campaignIntents: state.campaignIntents.map(i => i.id === id ? { ...i, ...updates } : i),
+      })),
+
+      removeCampaignIntent: (id) => set((state) => ({
+        campaignIntents: state.campaignIntents.filter(i => i.id !== id),
+      })),
       
       addCampaign: (campaign) => {
         set((state) => ({
           campaigns: [...state.campaigns, campaign],
         }));
-        // Update project stage to LIVE when campaign is added
         if (campaign.projectId) {
           get().updateProjectStage(campaign.projectId, 'LIVE');
         }
@@ -227,7 +269,6 @@ export const useProjectStore = create<ProjectState>()(
         
         if (currentStageIndex >= requiredStageIndex) return null;
 
-        // Return specific reason based on what's missing
         switch (requiredStage) {
           case 'ACCOUNTS_CONNECTED':
             return 'Connect at least one ad account to continue';

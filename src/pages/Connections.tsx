@@ -5,7 +5,7 @@ import { StatusBadge } from '@/components/common/StatusBadge';
 import { useProjectStore } from '@/stores/projectStore';
 import { useToast } from '@/hooks/use-toast';
 import type { Platform, AdAccountConnection, PlatformPermissions } from '@/types';
-import { Check, X, AlertTriangle, Link2, ExternalLink, RefreshCw } from 'lucide-react';
+import { Check, X, AlertTriangle, Link2, ExternalLink, RefreshCw, Plus, Trash2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 const platformDetails: Record<Platform, { 
@@ -52,13 +52,67 @@ function PermissionIndicator({ label, allowed }: { label: string; allowed: boole
   );
 }
 
-function ConnectionCard({ platform }: { platform: Platform }) {
+function AccountItem({ 
+  connection, 
+  onDisconnect 
+}: { 
+  connection: AdAccountConnection; 
+  onDisconnect: () => void;
+}) {
+  return (
+    <div className="rounded-lg border border-border bg-background p-4 space-y-3">
+      <div className="flex items-start justify-between">
+        <div>
+          <p className="font-medium text-foreground">{connection.accountName}</p>
+          <p className="text-sm text-muted-foreground">ID: {connection.accountId}</p>
+        </div>
+        <StatusBadge status={connection.status} />
+      </div>
+
+      {/* Permission Summary */}
+      <div className="grid grid-cols-3 gap-2">
+        <PermissionIndicator label="Analyze" allowed={connection.permissions.canAnalyze} />
+        <PermissionIndicator label="Launch" allowed={connection.permissions.canLaunch} />
+        <PermissionIndicator label="Optimize" allowed={connection.permissions.canOptimize} />
+      </div>
+
+      {/* Limited Access Warning */}
+      {connection.status === 'limited_access' && (
+        <div className="flex items-start gap-2 rounded-md border border-warning/20 bg-warning/5 p-2">
+          <AlertTriangle className="h-4 w-4 shrink-0 text-warning mt-0.5" />
+          <p className="text-xs text-muted-foreground">
+            Limited access. Invite an admin to unlock launch and optimization.
+          </p>
+        </div>
+      )}
+
+      {/* Actions */}
+      <div className="flex gap-2">
+        <Button variant="outline" size="sm" className="flex-1">
+          <RefreshCw className="mr-2 h-3 w-3" />
+          Refresh
+        </Button>
+        <Button 
+          variant="outline" 
+          size="sm" 
+          className="text-destructive hover:text-destructive"
+          onClick={onDisconnect}
+        >
+          <Trash2 className="h-3 w-3" />
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+function PlatformSection({ platform }: { platform: Platform }) {
   const [isConnecting, setIsConnecting] = useState(false);
-  const { currentProject, addConnection } = useProjectStore();
+  const { currentProject, addConnection, removeConnection } = useProjectStore();
   const { toast } = useToast();
   
   const details = platformDetails[platform];
-  const connection = currentProject?.connections.find(c => c.platform === platform);
+  const connections = currentProject?.connections.filter(c => c.platform === platform) || [];
+  const accountCount = connections.length;
 
   const handleConnect = async () => {
     if (!currentProject) {
@@ -72,16 +126,17 @@ function ConnectionCard({ platform }: { platform: Platform }) {
 
     setIsConnecting(true);
     
-    // TODO: Replace with actual OAuth flow
     try {
+      // TODO: Replace with actual OAuth flow
       await new Promise(resolve => setTimeout(resolve, 2000));
       
       // Simulated connection response - replace with real API
+      const accountNumber = accountCount + 1;
       const mockConnection: AdAccountConnection = {
         id: `${platform}-${Date.now()}`,
         platform,
-        accountId: `${platform.toUpperCase()}-123456`,
-        accountName: `My ${details.name} Account`,
+        accountId: `${platform.toUpperCase()}-${Math.random().toString(36).substring(7).toUpperCase()}`,
+        accountName: `${details.name} Account ${accountNumber}`,
         status: Math.random() > 0.3 ? 'connected' : 'limited_access',
         permissions: {
           canAnalyze: true,
@@ -95,7 +150,7 @@ function ConnectionCard({ platform }: { platform: Platform }) {
       
       toast({
         title: 'Account Connected',
-        description: `Successfully connected your ${details.name} account.`,
+        description: `Successfully connected ${mockConnection.accountName}.`,
       });
     } catch (error) {
       toast({
@@ -108,10 +163,12 @@ function ConnectionCard({ platform }: { platform: Platform }) {
     }
   };
 
-  const handleDisconnect = async () => {
+  const handleDisconnect = (connectionId: string, accountName: string) => {
+    if (!currentProject) return;
+    removeConnection(currentProject.id, connectionId);
     toast({
-      title: 'Disconnected',
-      description: `${details.name} account has been disconnected.`,
+      title: 'Account Disconnected',
+      description: `${accountName} has been disconnected.`,
     });
   };
 
@@ -123,79 +180,63 @@ function ConnectionCard({ platform }: { platform: Platform }) {
           <div className="flex items-center gap-3">
             <span className="text-3xl">{details.icon}</span>
             <div>
-              <CardTitle>{details.name}</CardTitle>
+              <CardTitle className="flex items-center gap-2">
+                {details.name}
+                {accountCount > 0 && (
+                  <span className="rounded-full bg-primary/10 px-2 py-0.5 text-xs font-medium text-primary">
+                    {accountCount} account{accountCount !== 1 ? 's' : ''}
+                  </span>
+                )}
+              </CardTitle>
               <CardDescription className="mt-1">
-                {connection 
-                  ? `Connected: ${connection.accountName}`
-                  : details.description}
+                {accountCount === 0 
+                  ? details.description 
+                  : `${accountCount} account${accountCount !== 1 ? 's' : ''} connected`}
               </CardDescription>
             </div>
           </div>
-          {connection && <StatusBadge status={connection.status} />}
         </div>
       </CardHeader>
-      <CardContent className="space-y-6">
-        {connection ? (
-          <>
-            {/* Permission Summary */}
-            <div className="space-y-3">
-              <p className="text-sm font-medium text-foreground">Permissions</p>
-              <div className="grid gap-2">
-                <PermissionIndicator label="Can Analyze" allowed={connection.permissions.canAnalyze} />
-                <PermissionIndicator label="Can Launch" allowed={connection.permissions.canLaunch} />
-                <PermissionIndicator label="Can Optimize" allowed={connection.permissions.canOptimize} />
-              </div>
-            </div>
-
-            {/* Limited Access Warning */}
-            {connection.status === 'limited_access' && (
-              <div className="flex items-start gap-3 rounded-lg border border-warning/20 bg-warning/5 p-4">
-                <AlertTriangle className="h-5 w-5 shrink-0 text-warning" />
-                <div>
-                  <p className="font-medium text-foreground">Limited Access</p>
-                  <p className="mt-1 text-sm text-muted-foreground">
-                    Some features are unavailable. Invite an admin to unlock automated launch and optimization.
-                  </p>
-                </div>
-              </div>
-            )}
-
-            {/* Actions */}
-            <div className="flex gap-3">
-              <Button variant="outline" size="sm" className="flex-1">
-                <RefreshCw className="mr-2 h-4 w-4" />
-                Refresh Permissions
-              </Button>
-              <Button 
-                variant="outline" 
-                size="sm" 
-                className="text-destructive hover:text-destructive"
-                onClick={handleDisconnect}
-              >
-                Disconnect
-              </Button>
-            </div>
-          </>
-        ) : (
-          <Button 
-            onClick={handleConnect} 
-            disabled={isConnecting || !currentProject}
-            className="w-full"
-            variant={platform === 'google' ? 'google' : platform === 'tiktok' ? 'tiktok' : 'snapchat'}
-          >
-            {isConnecting ? (
-              <>
-                <RefreshCw className="mr-2 h-4 w-4 animate-spin" />
-                Connecting...
-              </>
-            ) : (
-              <>
-                <Link2 className="mr-2 h-4 w-4" />
-                Connect {details.name}
-              </>
-            )}
-          </Button>
+      <CardContent className="space-y-4">
+        {/* Connected Accounts List */}
+        {connections.length > 0 && (
+          <div className="space-y-3">
+            {connections.map(connection => (
+              <AccountItem 
+                key={connection.id} 
+                connection={connection}
+                onDisconnect={() => handleDisconnect(connection.id, connection.accountName)}
+              />
+            ))}
+          </div>
         )}
+
+        {/* Add Account Button */}
+        <Button 
+          onClick={handleConnect} 
+          disabled={isConnecting || !currentProject}
+          className="w-full"
+          variant={connections.length > 0 ? 'outline' : (
+            platform === 'google' ? 'google' : 
+            platform === 'tiktok' ? 'tiktok' : 'snapchat'
+          )}
+        >
+          {isConnecting ? (
+            <>
+              <RefreshCw className="mr-2 h-4 w-4 animate-spin" />
+              Connecting...
+            </>
+          ) : (
+            <>
+              {connections.length > 0 ? (
+                <Plus className="mr-2 h-4 w-4" />
+              ) : (
+                <Link2 className="mr-2 h-4 w-4" />
+              )}
+              {connections.length > 0 ? 'Add Another Account' : `Connect ${details.name}`}
+            </>
+          )}
+        </Button>
       </CardContent>
     </Card>
   );
@@ -204,13 +245,16 @@ function ConnectionCard({ platform }: { platform: Platform }) {
 export default function Connections() {
   const { currentProject } = useProjectStore();
 
+  const totalConnections = currentProject?.connections.length || 0;
+  const launchableConnections = currentProject?.connections.filter(c => c.permissions.canLaunch).length || 0;
+
   return (
     <div className="space-y-8">
       {/* Header */}
       <div>
         <h1 className="text-3xl font-bold text-foreground">Ad Account Connections</h1>
         <p className="mt-1 text-muted-foreground">
-          Connect your advertising accounts to enable campaign launch and optimization.
+          Connect unlimited ad accounts per platform. Each account can have different permission levels.
         </p>
       </div>
 
@@ -227,19 +271,53 @@ export default function Connections() {
         </div>
       )}
 
+      {/* Summary Stats */}
+      {currentProject && totalConnections > 0 && (
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+          <Card className="border-border bg-card">
+            <CardContent className="p-4">
+              <p className="text-sm text-muted-foreground">Total Accounts</p>
+              <p className="text-2xl font-bold text-foreground">{totalConnections}</p>
+            </CardContent>
+          </Card>
+          <Card className="border-border bg-card">
+            <CardContent className="p-4">
+              <p className="text-sm text-muted-foreground">Launch Enabled</p>
+              <p className="text-2xl font-bold text-success">{launchableConnections}</p>
+            </CardContent>
+          </Card>
+          <Card className="border-border bg-card">
+            <CardContent className="p-4">
+              <p className="text-sm text-muted-foreground">Limited Access</p>
+              <p className="text-2xl font-bold text-warning">
+                {totalConnections - launchableConnections}
+              </p>
+            </CardContent>
+          </Card>
+          <Card className="border-border bg-card">
+            <CardContent className="p-4">
+              <p className="text-sm text-muted-foreground">Platforms</p>
+              <p className="text-2xl font-bold text-foreground">
+                {new Set(currentProject?.connections.map(c => c.platform)).size}
+              </p>
+            </CardContent>
+          </Card>
+        </div>
+      )}
+
       {/* Connection Cards */}
-      <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
-        <ConnectionCard platform="google" />
-        <ConnectionCard platform="tiktok" />
-        <ConnectionCard platform="snapchat" />
+      <div className="grid gap-6 lg:grid-cols-3">
+        <PlatformSection platform="google" />
+        <PlatformSection platform="tiktok" />
+        <PlatformSection platform="snapchat" />
       </div>
 
       {/* Help Section */}
       <Card className="border-border bg-card">
         <CardHeader>
-          <CardTitle>Need Help?</CardTitle>
+          <CardTitle>Understanding Permissions</CardTitle>
           <CardDescription>
-            Understanding permissions and access levels
+            Each ad account has its own permission level based on your access role
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
@@ -247,19 +325,19 @@ export default function Connections() {
             <div>
               <h4 className="font-medium text-foreground">Can Analyze</h4>
               <p className="mt-1 text-sm text-muted-foreground">
-                Allows AdLaunch AI to review your ads for policy compliance and creative quality before launch.
+                Review ads for policy compliance and creative quality before launch.
               </p>
             </div>
             <div>
               <h4 className="font-medium text-foreground">Can Launch</h4>
               <p className="mt-1 text-sm text-muted-foreground">
-                Enables automated campaign creation and ad deployment directly from AdLaunch AI.
+                Create campaigns and deploy ads directly. Requires elevated access.
               </p>
             </div>
             <div>
               <h4 className="font-medium text-foreground">Can Optimize</h4>
               <p className="mt-1 text-sm text-muted-foreground">
-                Allows AI-driven budget adjustments, bid optimization, and creative modifications.
+                AI-driven budget adjustments and bid optimization. Requires full access.
               </p>
             </div>
           </div>
