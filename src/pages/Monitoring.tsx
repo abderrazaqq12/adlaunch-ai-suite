@@ -7,7 +7,9 @@ import { ProjectGate } from '@/components/common/ProjectGate';
 import { PlatformBadge } from '@/components/common/PlatformBadge';
 import { StatusBadge } from '@/components/common/StatusBadge';
 import { StatCard } from '@/components/common/StatCard';
-import type { Platform, Campaign, AIAction } from '@/types';
+import { ExecutionStatusBadge } from '@/components/common/ExecutionStatusBadge';
+import type { Platform, Campaign, AIAction, CampaignIntent } from '@/types';
+import { PLATFORM_OBJECTIVE_NAMES } from '@/types';
 import { 
   Activity, 
   DollarSign, 
@@ -19,6 +21,9 @@ import {
   RefreshCw,
   Bot,
   Clock,
+  Layers,
+  Calendar,
+  ChevronRight,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
@@ -159,20 +164,114 @@ function AIActionLog({ actions }: { actions: AIAction[] }) {
   );
 }
 
+function CampaignIntentCard({ intent, campaignsCount }: { intent: CampaignIntent; campaignsCount: number }) {
+  const formatDate = (dateString: string) => {
+    return new Date(dateString).toLocaleDateString('en-US', {
+      month: 'short',
+      day: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+    });
+  };
+
+  return (
+    <div className="rounded-lg border border-border bg-card p-4">
+      <div className="flex items-start justify-between gap-4">
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2 mb-2">
+            <ExecutionStatusBadge status={intent.executionStatus || 'DRAFT'} />
+            <span className="text-xs text-muted-foreground capitalize">
+              {intent.objective === 'conversion' ? 'Conversion' : 'Video Views'}
+            </span>
+          </div>
+          <h4 className="font-medium text-foreground truncate">{intent.name}</h4>
+          <div className="flex items-center gap-4 mt-2 text-sm text-muted-foreground">
+            <span className="flex items-center gap-1">
+              <Calendar className="h-3.5 w-3.5" />
+              {formatDate(intent.createdAt)}
+            </span>
+            <span className="flex items-center gap-1">
+              <Layers className="h-3.5 w-3.5" />
+              {campaignsCount} campaign{campaignsCount !== 1 ? 's' : ''}
+            </span>
+          </div>
+        </div>
+        <div className="flex flex-wrap gap-1 shrink-0">
+          {intent.selectedPlatforms.map(platform => (
+            <PlatformBadge key={platform} platform={platform} size="sm" />
+          ))}
+        </div>
+      </div>
+      
+      {/* Platform breakdown */}
+      <div className="mt-3 pt-3 border-t border-border">
+        <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
+          {intent.accountSelections.map(selection => {
+            const platformLabel = selection.platform === 'google' ? 'Google' : 
+                                 selection.platform === 'tiktok' ? 'TikTok' : 'Snapchat';
+            return (
+              <span key={selection.platform}>
+                {platformLabel}: {selection.accountIds.length} account{selection.accountIds.length !== 1 ? 's' : ''}
+              </span>
+            );
+          })}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function CampaignIntentHistory({ intents, campaigns }: { intents: CampaignIntent[]; campaigns: Campaign[] }) {
+  if (intents.length === 0) {
+    return (
+      <div className="flex flex-col items-center justify-center py-8 text-center">
+        <Layers className="h-10 w-10 text-muted-foreground mb-3" />
+        <p className="font-medium text-foreground">No Campaign Intents</p>
+        <p className="text-sm text-muted-foreground mt-1">
+          Launch your first campaign to see history here.
+        </p>
+      </div>
+    );
+  }
+
+  // Sort by createdAt descending (newest first)
+  const sortedIntents = [...intents].sort(
+    (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+  );
+
+  return (
+    <div className="space-y-3">
+      {sortedIntents.map(intent => {
+        const intentCampaigns = campaigns.filter(c => c.intentId === intent.id);
+        return (
+          <CampaignIntentCard 
+            key={intent.id} 
+            intent={intent} 
+            campaignsCount={intentCampaigns.length}
+          />
+        );
+      })}
+    </div>
+  );
+}
+
 function MonitoringContent() {
   const [activeTab, setActiveTab] = useState<'all' | Platform>('all');
-  const { campaigns } = useProjectStore();
+  const { campaigns, campaignIntents, currentProject } = useProjectStore();
+
+  const projectCampaigns = campaigns.filter(c => c.projectId === currentProject?.id);
+  const projectIntents = campaignIntents.filter(i => i.projectId === currentProject?.id);
 
   const filteredCampaigns = activeTab === 'all'
-    ? campaigns
-    : campaigns.filter(c => c.platform === activeTab);
+    ? projectCampaigns
+    : projectCampaigns.filter(c => c.platform === activeTab);
 
   // Calculate totals
-  const totalSpend = campaigns.reduce((sum, c) => sum + c.metrics.spend, 0);
-  const totalClicks = campaigns.reduce((sum, c) => sum + c.metrics.clicks, 0);
-  const totalConversions = campaigns.reduce((sum, c) => sum + c.metrics.conversions, 0);
-  const avgRoas = campaigns.length > 0
-    ? campaigns.reduce((sum, c) => sum + c.metrics.roas, 0) / campaigns.length
+  const totalSpend = projectCampaigns.reduce((sum, c) => sum + c.metrics.spend, 0);
+  const totalClicks = projectCampaigns.reduce((sum, c) => sum + c.metrics.clicks, 0);
+  const totalConversions = projectCampaigns.reduce((sum, c) => sum + c.metrics.conversions, 0);
+  const avgRoas = projectCampaigns.length > 0
+    ? projectCampaigns.reduce((sum, c) => sum + c.metrics.roas, 0) / projectCampaigns.length
     : 0;
 
   return (
@@ -215,8 +314,9 @@ function MonitoringContent() {
         />
       </div>
 
-      {/* Platform Filter & Campaigns */}
+      {/* Main Content Grid */}
       <div className="grid gap-8 lg:grid-cols-3">
+        {/* Platform Filter & Campaigns */}
         <div className="lg:col-span-2 space-y-6">
           <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as any)}>
             <TabsList>
@@ -246,21 +346,40 @@ function MonitoringContent() {
           )}
         </div>
 
-        {/* AI Actions Log */}
-        <Card className="border-border bg-card h-fit">
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <Bot className="h-5 w-5 text-primary" />
-              AI Actions Log
-            </CardTitle>
-            <CardDescription>
-              Recent automated decisions and optimizations.
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            <AIActionLog actions={mockAIActions} />
-          </CardContent>
-        </Card>
+        {/* Right Column: AI Actions & Intent History */}
+        <div className="space-y-6">
+          {/* Campaign Intent History */}
+          <Card className="border-border bg-card">
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <Layers className="h-5 w-5 text-primary" />
+                Campaign Intents
+              </CardTitle>
+              <CardDescription>
+                History of campaign launches with execution status.
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <CampaignIntentHistory intents={projectIntents} campaigns={projectCampaigns} />
+            </CardContent>
+          </Card>
+
+          {/* AI Actions Log */}
+          <Card className="border-border bg-card">
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <Bot className="h-5 w-5 text-primary" />
+                AI Actions Log
+              </CardTitle>
+              <CardDescription>
+                Recent automated decisions and optimizations.
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <AIActionLog actions={mockAIActions} />
+            </CardContent>
+          </Card>
+        </div>
       </div>
     </div>
   );
