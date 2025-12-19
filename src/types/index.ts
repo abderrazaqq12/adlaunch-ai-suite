@@ -19,6 +19,40 @@ export type AssetStatus =
   | 'APPROVED';
 
 // ============================================
+// CAMPAIGN EXECUTION READINESS
+// ============================================
+
+export type ExecutionStatus = 'DRAFT' | 'READY' | 'BLOCKED' | 'PARTIAL_READY';
+
+export interface ExecutionBlocker {
+  type: 'assets' | 'platform_config' | 'permissions' | 'analysis';
+  platform?: Platform;
+  accountId?: string;
+  accountName?: string;
+  message: string;
+  severity: 'error' | 'warning'; // error = blocked, warning = skip
+}
+
+export interface PlatformExecutionStatus {
+  platform: Platform;
+  status: 'ready' | 'blocked' | 'partial';
+  readyAccounts: string[]; // account IDs that can launch
+  blockedAccounts: { id: string; name: string; reason: string }[];
+  blockers: ExecutionBlocker[];
+}
+
+export interface CampaignExecutionReadiness {
+  status: ExecutionStatus;
+  canLaunch: boolean;
+  totalCampaignsPlanned: number;
+  totalCampaignsReady: number;
+  totalCampaignsBlocked: number;
+  platformStatuses: PlatformExecutionStatus[];
+  globalBlockers: ExecutionBlocker[]; // Blockers that affect all platforms
+  summary: string;
+}
+
+// ============================================
 // CAMPAIGN INTENT SYSTEM
 // ============================================
 
@@ -105,6 +139,9 @@ export interface CampaignIntent {
   
   // Settings
   softLaunch: boolean;
+  
+  // Execution readiness (computed at launch time)
+  executionStatus?: ExecutionStatus;
   
   // Metadata
   status: 'draft' | 'launching' | 'launched' | 'failed';

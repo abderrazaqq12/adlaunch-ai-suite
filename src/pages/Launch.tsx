@@ -9,8 +9,11 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Checkbox } from '@/components/ui/checkbox';
 import { useProjectStore } from '@/stores/projectStore';
 import { useToast } from '@/hooks/use-toast';
-import { ProjectGate, useLaunchReadiness, DisabledReason } from '@/components/common/ProjectGate';
+import { ProjectGate } from '@/components/common/ProjectGate';
 import { PlatformBadge } from '@/components/common/PlatformBadge';
+import { ExecutionReadinessPanel } from '@/components/common/ExecutionReadinessPanel';
+import { ExecutionStatusBadge } from '@/components/common/ExecutionStatusBadge';
+import { useExecutionReadiness } from '@/hooks/useExecutionReadiness';
 import type { 
   Platform, 
   Campaign, 
@@ -102,7 +105,6 @@ function LaunchContent() {
   const navigate = useNavigate();
   const { currentProject, assets, addCampaignIntent, addCampaign } = useProjectStore();
   const { toast } = useToast();
-  const { canLaunch, reasons } = useLaunchReadiness();
 
   // Wizard state
   const [currentStep, setCurrentStep] = useState<WizardStep>('intent');
@@ -134,6 +136,17 @@ function LaunchContent() {
   });
 
   const platforms: Platform[] = ['google', 'tiktok', 'snapchat'];
+
+  // Compute execution readiness
+  const executionReadiness = useExecutionReadiness({
+    selectedAssetIds,
+    selectedPlatforms,
+    accountSelections,
+    platformConfigs,
+    objective,
+    landingPageUrl,
+    campaignName,
+  });
 
   const approvedAssets = useMemo(() => 
     assets.filter(a => a.projectId === currentProject?.id && a.status === 'APPROVED'),
@@ -234,7 +247,7 @@ function LaunchContent() {
   };
 
   const handleLaunch = async () => {
-    if (!canLaunch || !currentProject) return;
+    if (!executionReadiness.canLaunch || !currentProject) return;
 
     setIsLaunching(true);
 
@@ -244,7 +257,7 @@ function LaunchContent() {
 
       const intentId = `intent-${Date.now()}`;
       
-      // Create Campaign Intent
+      // Create Campaign Intent with execution status
       const intent: CampaignIntent = {
         id: intentId,
         projectId: currentProject.id,
@@ -258,30 +271,36 @@ function LaunchContent() {
         platformConfigs,
         dailyBudget: parseFloat(dailyBudget),
         softLaunch,
+        executionStatus: executionReadiness.status,
         status: 'launching',
         createdAt: new Date().toISOString(),
       };
 
       addCampaignIntent(intent);
 
-      // Create real campaigns for each platform × account combination
-      const skippedAccounts: string[] = [];
-      
-      for (const selection of accountSelections) {
-        for (const accountId of selection.accountIds) {
+      // Create real campaigns only for READY accounts based on executionReadiness
+      let launchedCount = 0;
+      const skippedDetails: string[] = [];
+
+      for (const platformStatus of executionReadiness.platformStatuses) {
+        const { platform, readyAccounts, blockedAccounts } = platformStatus;
+        
+        // Track blocked accounts for user feedback
+        for (const blocked of blockedAccounts) {
+          skippedDetails.push(`${blocked.name} (${blocked.reason})`);
+        }
+
+        // Only create campaigns for ready accounts
+        for (const accountId of readyAccounts) {
           const account = currentProject.connections.find(c => c.id === accountId);
-          
-          if (!account?.permissions.canLaunch) {
-            skippedAccounts.push(account?.accountName || accountId);
-            continue;
-          }
+          if (!account) continue;
 
           const campaign: Campaign = {
-            id: `campaign-${Date.now()}-${selection.platform}-${accountId}`,
+            id: `campaign-${Date.now()}-${platform}-${accountId}`,
             projectId: currentProject.id,
             intentId,
             name: `${campaignName} - ${account.accountName}`,
-            platform: selection.platform,
+            platform,
             accountId,
             status: 'pending',
             budget: parseFloat(dailyBudget),
@@ -302,20 +321,22 @@ function LaunchContent() {
           };
 
           addCampaign(campaign);
+          launchedCount++;
         }
       }
 
-      if (skippedAccounts.length > 0) {
+      // Show skipped accounts warning
+      if (skippedDetails.length > 0) {
         toast({
           title: 'Some Accounts Skipped',
-          description: `${skippedAccounts.length} account(s) skipped due to insufficient permissions: ${skippedAccounts.join(', ')}`,
+          description: `${skippedDetails.length} account(s) skipped: ${skippedDetails.slice(0, 3).join(', ')}${skippedDetails.length > 3 ? '...' : ''}`,
           variant: 'default',
         });
       }
 
       toast({
         title: 'Campaigns Launched!',
-        description: `${totalCampaigns - skippedAccounts.length} campaign(s) submitted for review.`,
+        description: `${launchedCount} campaign(s) submitted for review.`,
       });
 
       navigate('/monitoring');
@@ -901,10 +922,8 @@ function LaunchContent() {
         </CardContent>
       </Card>
 
-      {/* Warnings */}
-      {!canLaunch && (
-        <DisabledReason reasons={reasons} />
-      )}
+      {/* Execution Readiness */}
+      <ExecutionReadinessPanel readiness={executionReadiness} />
     </div>
   );
 
@@ -918,13 +937,13 @@ function LaunchContent() {
         </p>
       </div>
 
-      {/* Step Indicator */}
-      <StepIndicator currentStep={currentStep} steps={STEPS} />
-
-      {/* Launch Readiness Status */}
-      {!canLaunch && currentStep === 'intent' && (
-        <DisabledReason reasons={reasons} />
-      )}
+      {/* Step Indicator with Execution Status */}
+      <div className="flex items-center justify-between">
+        <StepIndicator currentStep={currentStep} steps={STEPS} />
+        {currentStep !== 'intent' && (
+          <ExecutionStatusBadge status={executionReadiness.status} />
+        )}
+      </div>
 
       {/* Step Content */}
       {currentStep === 'intent' && renderIntentStep()}
@@ -948,17 +967,18 @@ function LaunchContent() {
             variant="glow" 
             size="lg"
             onClick={handleLaunch}
-            disabled={isLaunching || !canLaunch || totalCampaigns === 0}
+            disabled={isLaunching || !executionReadiness.canLaunch || executionReadiness.totalCampaignsReady === 0}
           >
             {isLaunching ? (
               <>
                 <Zap className="mr-2 h-5 w-5 animate-pulse" />
-                Launching {totalCampaigns} Campaign{totalCampaigns !== 1 ? 's' : ''}...
+                Launching {executionReadiness.totalCampaignsReady} Campaign{executionReadiness.totalCampaignsReady !== 1 ? 's' : ''}...
               </>
             ) : (
               <>
                 <Rocket className="mr-2 h-5 w-5" />
-                Launch {totalCampaigns} Campaign{totalCampaigns !== 1 ? 's' : ''}
+                Launch {executionReadiness.totalCampaignsReady} Campaign{executionReadiness.totalCampaignsReady !== 1 ? 's' : ''}
+                {executionReadiness.status === 'PARTIAL_READY' && ` (${executionReadiness.totalCampaignsBlocked} skipped)`}
               </>
             )}
           </Button>
