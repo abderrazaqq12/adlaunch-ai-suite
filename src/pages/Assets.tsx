@@ -8,6 +8,8 @@ import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useProjectStore } from '@/stores/projectStore';
 import { useToast } from '@/hooks/use-toast';
+import { ProjectGate } from '@/components/common/ProjectGate';
+import { AssetStatusBadge } from '@/components/common/AssetStatusBadge';
 import type { Asset, Platform } from '@/types';
 import { 
   Upload, 
@@ -30,7 +32,7 @@ const tagOptions = {
 
 const platformOptions: Platform[] = ['google', 'tiktok', 'snapchat'];
 
-export default function Assets() {
+function AssetsContent() {
   const [activeTab, setActiveTab] = useState('videos');
   const [selectedTags, setSelectedTags] = useState<string[]>([]);
   const [selectedPlatforms, setSelectedPlatforms] = useState<Platform[]>([]);
@@ -58,6 +60,7 @@ export default function Assets() {
         tags: selectedTags.map(t => ({ type: 'hook', value: t })),
         platforms: selectedPlatforms,
         createdAt: new Date().toISOString(),
+        status: 'UPLOADED',
       };
       addAsset(newAsset);
     });
@@ -84,6 +87,7 @@ export default function Assets() {
       tags: selectedTags.map(t => ({ type: 'hook', value: t })),
       platforms: selectedPlatforms,
       createdAt: new Date().toISOString(),
+      status: 'UPLOADED',
     };
     addAsset(newAsset);
 
@@ -232,8 +236,11 @@ export default function Assets() {
                   <CardContent className="p-4">
                     <div className="flex items-start justify-between">
                       <div className="flex-1 truncate">
-                        <p className="truncate font-medium text-foreground">{asset.name}</p>
-                        <div className="mt-2 flex flex-wrap gap-1">
+                        <div className="flex items-center gap-2 mb-2">
+                          <p className="truncate font-medium text-foreground">{asset.name}</p>
+                          <AssetStatusBadge status={asset.status} size="sm" />
+                        </div>
+                        <div className="flex flex-wrap gap-1">
                           {asset.platforms.map(p => (
                             <Badge key={p} variant="secondary" className="text-xs capitalize">
                               {p}
@@ -311,6 +318,9 @@ export default function Assets() {
                 <Card key={asset.id} className="border-border bg-card">
                   <CardContent className="flex items-start justify-between p-4">
                     <div className="flex-1">
+                      <div className="flex items-center gap-2 mb-2">
+                        <AssetStatusBadge status={asset.status} size="sm" />
+                      </div>
                       <p className="text-foreground">{asset.content}</p>
                       <div className="mt-2 flex flex-wrap gap-1">
                         {asset.tags.map((tag, i) => (
@@ -366,5 +376,13 @@ export default function Assets() {
         </TabsContent>
       </Tabs>
     </div>
+  );
+}
+
+export default function Assets() {
+  return (
+    <ProjectGate>
+      <AssetsContent />
+    </ProjectGate>
   );
 }

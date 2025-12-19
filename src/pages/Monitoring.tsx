@@ -3,6 +3,7 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useProjectStore } from '@/stores/projectStore';
+import { ProjectGate } from '@/components/common/ProjectGate';
 import { PlatformBadge } from '@/components/common/PlatformBadge';
 import { StatusBadge } from '@/components/common/StatusBadge';
 import { StatCard } from '@/components/common/StatCard';
@@ -158,7 +159,7 @@ function AIActionLog({ actions }: { actions: AIAction[] }) {
   );
 }
 
-export default function Monitoring() {
+function MonitoringContent() {
   const [activeTab, setActiveTab] = useState<'all' | Platform>('all');
   const { campaigns } = useProjectStore();
 
@@ -262,5 +263,13 @@ export default function Monitoring() {
         </Card>
       </div>
     </div>
+  );
+}
+
+export default function Monitoring() {
+  return (
+    <ProjectGate requiredStage="LIVE">
+      <MonitoringContent />
+    </ProjectGate>
   );
 }

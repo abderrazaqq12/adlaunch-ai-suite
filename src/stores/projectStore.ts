@@ -1,6 +1,16 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
-import type { Project, AdAccountConnection, Asset, Campaign, AutomationRule, User } from '@/types';
+import type { 
+  Project, 
+  AdAccountConnection, 
+  Asset, 
+  Campaign, 
+  AutomationRule, 
+  User,
+  ProjectStage,
+  AssetStatus,
+  AssetAnalysisResult,
+} from '@/types';
 
 interface ProjectState {
   user: User | null;
@@ -17,6 +27,7 @@ interface ProjectState {
   setCurrentProject: (project: Project | null) => void;
   addProject: (project: Project) => void;
   updateProject: (id: string, updates: Partial<Project>) => void;
+  updateProjectStage: (projectId: string, stage: ProjectStage) => void;
   
   // Connection actions
   addConnection: (projectId: string, connection: AdAccountConnection) => void;
@@ -26,6 +37,7 @@ interface ProjectState {
   addAsset: (asset: Asset) => void;
   removeAsset: (id: string) => void;
   updateAsset: (id: string, updates: Partial<Asset>) => void;
+  updateAssetStatus: (id: string, status: AssetStatus, analysisResult?: AssetAnalysisResult) => void;
   
   // Campaign actions
   addCampaign: (campaign: Campaign) => void;
@@ -35,11 +47,33 @@ interface ProjectState {
   addRule: (rule: AutomationRule) => void;
   updateRule: (id: string, updates: Partial<AutomationRule>) => void;
   removeRule: (id: string) => void;
+
+  // Pipeline validation helpers
+  getProjectStage: (projectId: string) => ProjectStage;
+  canAccessStage: (projectId: string, requiredStage: ProjectStage) => boolean;
+  getStageBlockReason: (projectId: string, requiredStage: ProjectStage) => string | null;
+  hasApprovedAssets: (projectId: string) => boolean;
+  hasConnectedAccounts: (projectId: string) => boolean;
+  canLaunchOnAnyPlatform: (projectId: string) => boolean;
+  recalculateProjectStage: (projectId: string) => void;
 }
+
+const STAGE_ORDER: ProjectStage[] = [
+  'SETUP',
+  'ACCOUNTS_CONNECTED',
+  'ASSETS_READY',
+  'ANALYSIS_PASSED',
+  'READY_TO_LAUNCH',
+  'LIVE',
+];
+
+const getStageIndex = (stage: ProjectStage): number => {
+  return STAGE_ORDER.indexOf(stage);
+};
 
 export const useProjectStore = create<ProjectState>()(
   persist(
-    (set) => ({
+    (set, get) => ({
       user: null,
       projects: [],
       currentProject: null,
@@ -52,8 +86,8 @@ export const useProjectStore = create<ProjectState>()(
       setCurrentProject: (project) => set({ currentProject: project }),
       
       addProject: (project) => set((state) => ({
-        projects: [...state.projects, project],
-        currentProject: project,
+        projects: [...state.projects, { ...project, stage: 'SETUP' }],
+        currentProject: { ...project, stage: 'SETUP' },
       })),
       
       updateProject: (id, updates) => set((state) => ({
@@ -62,17 +96,28 @@ export const useProjectStore = create<ProjectState>()(
           ? { ...state.currentProject, ...updates } 
           : state.currentProject,
       })),
-      
-      addConnection: (projectId, connection) => set((state) => ({
-        projects: state.projects.map((p) => 
-          p.id === projectId 
-            ? { ...p, connections: [...p.connections, connection] }
-            : p
-        ),
+
+      updateProjectStage: (projectId, stage) => set((state) => ({
+        projects: state.projects.map((p) => p.id === projectId ? { ...p, stage } : p),
         currentProject: state.currentProject?.id === projectId
-          ? { ...state.currentProject, connections: [...state.currentProject.connections, connection] }
+          ? { ...state.currentProject, stage }
           : state.currentProject,
       })),
+      
+      addConnection: (projectId, connection) => {
+        set((state) => ({
+          projects: state.projects.map((p) => 
+            p.id === projectId 
+              ? { ...p, connections: [...p.connections, connection] }
+              : p
+          ),
+          currentProject: state.currentProject?.id === projectId
+            ? { ...state.currentProject, connections: [...state.currentProject.connections, connection] }
+            : state.currentProject,
+        }));
+        // Recalculate stage after adding connection
+        get().recalculateProjectStage(projectId);
+      },
       
       updateConnection: (projectId, connectionId, updates) => set((state) => ({
         projects: state.projects.map((p) =>
@@ -95,19 +140,55 @@ export const useProjectStore = create<ProjectState>()(
           : state.currentProject,
       })),
       
-      addAsset: (asset) => set((state) => ({ assets: [...state.assets, asset] })),
+      addAsset: (asset) => {
+        const assetWithStatus: Asset = { ...asset, status: 'UPLOADED' };
+        set((state) => ({ assets: [...state.assets, assetWithStatus] }));
+        // Recalculate stage after adding asset
+        if (asset.projectId) {
+          get().recalculateProjectStage(asset.projectId);
+        }
+      },
       
-      removeAsset: (id) => set((state) => ({
-        assets: state.assets.filter((a) => a.id !== id),
-      })),
+      removeAsset: (id) => {
+        const state = get();
+        const asset = state.assets.find(a => a.id === id);
+        set((state) => ({
+          assets: state.assets.filter((a) => a.id !== id),
+        }));
+        // Recalculate stage after removing asset
+        if (asset?.projectId) {
+          get().recalculateProjectStage(asset.projectId);
+        }
+      },
       
       updateAsset: (id, updates) => set((state) => ({
         assets: state.assets.map((a) => a.id === id ? { ...a, ...updates } : a),
       })),
+
+      updateAssetStatus: (id, status, analysisResult) => {
+        set((state) => ({
+          assets: state.assets.map((a) => 
+            a.id === id 
+              ? { ...a, status, analysisResult: analysisResult || a.analysisResult } 
+              : a
+          ),
+        }));
+        // Recalculate stage after updating asset status
+        const asset = get().assets.find(a => a.id === id);
+        if (asset?.projectId) {
+          get().recalculateProjectStage(asset.projectId);
+        }
+      },
       
-      addCampaign: (campaign) => set((state) => ({
-        campaigns: [...state.campaigns, campaign],
-      })),
+      addCampaign: (campaign) => {
+        set((state) => ({
+          campaigns: [...state.campaigns, campaign],
+        }));
+        // Update project stage to LIVE when campaign is added
+        if (campaign.projectId) {
+          get().updateProjectStage(campaign.projectId, 'LIVE');
+        }
+      },
       
       updateCampaign: (id, updates) => set((state) => ({
         campaigns: state.campaigns.map((c) => c.id === id ? { ...c, ...updates } : c),
@@ -122,6 +203,107 @@ export const useProjectStore = create<ProjectState>()(
       removeRule: (id) => set((state) => ({
         rules: state.rules.filter((r) => r.id !== id),
       })),
+
+      // Pipeline validation helpers
+      getProjectStage: (projectId) => {
+        const state = get();
+        const project = state.projects.find(p => p.id === projectId);
+        return project?.stage || 'SETUP';
+      },
+
+      canAccessStage: (projectId, requiredStage) => {
+        const currentStage = get().getProjectStage(projectId);
+        return getStageIndex(currentStage) >= getStageIndex(requiredStage);
+      },
+
+      getStageBlockReason: (projectId, requiredStage) => {
+        const state = get();
+        const project = state.projects.find(p => p.id === projectId);
+        
+        if (!project) return 'No project selected';
+        
+        const currentStageIndex = getStageIndex(project.stage);
+        const requiredStageIndex = getStageIndex(requiredStage);
+        
+        if (currentStageIndex >= requiredStageIndex) return null;
+
+        // Return specific reason based on what's missing
+        switch (requiredStage) {
+          case 'ACCOUNTS_CONNECTED':
+            return 'Connect at least one ad account to continue';
+          case 'ASSETS_READY':
+            if (!state.hasConnectedAccounts(projectId)) {
+              return 'Connect at least one ad account first';
+            }
+            return 'Upload at least one asset to continue';
+          case 'ANALYSIS_PASSED':
+            if (!state.hasApprovedAssets(projectId)) {
+              return 'Run pre-launch analysis and get at least one approved asset';
+            }
+            return 'Complete pre-launch analysis to unlock launch';
+          case 'READY_TO_LAUNCH':
+            if (!state.hasApprovedAssets(projectId)) {
+              return 'No approved assets. Run analysis first.';
+            }
+            if (!state.canLaunchOnAnyPlatform(projectId)) {
+              return 'No platform has launch permission. Check your ad account connections.';
+            }
+            return 'Configure launch settings to continue';
+          case 'LIVE':
+            return 'Launch a campaign to access monitoring';
+          default:
+            return null;
+        }
+      },
+
+      hasApprovedAssets: (projectId) => {
+        const state = get();
+        return state.assets.some(
+          a => a.projectId === projectId && a.status === 'APPROVED'
+        );
+      },
+
+      hasConnectedAccounts: (projectId) => {
+        const state = get();
+        const project = state.projects.find(p => p.id === projectId);
+        return project?.connections.some(c => c.status === 'connected' || c.status === 'limited_access') ?? false;
+      },
+
+      canLaunchOnAnyPlatform: (projectId) => {
+        const state = get();
+        const project = state.projects.find(p => p.id === projectId);
+        return project?.connections.some(c => c.permissions.canLaunch) ?? false;
+      },
+
+      recalculateProjectStage: (projectId) => {
+        const state = get();
+        const project = state.projects.find(p => p.id === projectId);
+        if (!project) return;
+
+        const projectAssets = state.assets.filter(a => a.projectId === projectId);
+        const hasConnections = state.hasConnectedAccounts(projectId);
+        const hasAssets = projectAssets.length > 0;
+        const hasApproved = state.hasApprovedAssets(projectId);
+        const hasCampaigns = state.campaigns.some(c => c.projectId === projectId);
+
+        let newStage: ProjectStage = 'SETUP';
+
+        if (hasCampaigns) {
+          newStage = 'LIVE';
+        } else if (hasApproved && state.canLaunchOnAnyPlatform(projectId)) {
+          newStage = 'READY_TO_LAUNCH';
+        } else if (hasApproved) {
+          newStage = 'ANALYSIS_PASSED';
+        } else if (hasAssets) {
+          newStage = 'ASSETS_READY';
+        } else if (hasConnections) {
+          newStage = 'ACCOUNTS_CONNECTED';
+        }
+
+        if (project.stage !== newStage) {
+          get().updateProjectStage(projectId, newStage);
+        }
+      },
     }),
     {
       name: 'adlaunch-storage',

@@ -83,6 +83,7 @@ export default function NewProject() {
         defaultPlatforms: selectedPlatforms,
         createdAt: new Date().toISOString(),
         connections: [],
+        stage: 'SETUP',
       };
 
       addProject(newProject);
