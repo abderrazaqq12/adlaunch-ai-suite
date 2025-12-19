@@ -2,6 +2,22 @@ export type Platform = 'google' | 'tiktok' | 'snapchat';
 
 export type ConnectionStatus = 'not_connected' | 'connected' | 'limited_access';
 
+// Project Pipeline Stages
+export type ProjectStage = 
+  | 'SETUP'
+  | 'ACCOUNTS_CONNECTED'
+  | 'ASSETS_READY'
+  | 'ANALYSIS_PASSED'
+  | 'READY_TO_LAUNCH'
+  | 'LIVE';
+
+// Asset Status System
+export type AssetStatus = 
+  | 'UPLOADED'
+  | 'ANALYZED'
+  | 'RISKY'
+  | 'APPROVED';
+
 export interface PlatformPermissions {
   canAnalyze: boolean;
   canLaunch: boolean;
@@ -27,6 +43,15 @@ export interface Project {
   defaultPlatforms: Platform[];
   createdAt: string;
   connections: AdAccountConnection[];
+  stage: ProjectStage;
+}
+
+export interface AssetAnalysisResult {
+  policyRiskScore: number;
+  creativeQualityScore: number;
+  passed: boolean;
+  analyzedAt: string;
+  issues: FlaggedIssue[];
 }
 
 export interface Asset {
@@ -39,6 +64,8 @@ export interface Asset {
   tags: AssetTag[];
   platforms: Platform[];
   createdAt: string;
+  status: AssetStatus;
+  analysisResult?: AssetAnalysisResult;
 }
 
 export interface AssetTag {
@@ -123,3 +150,34 @@ export interface User {
   name: string;
   avatar?: string;
 }
+
+// Stage Requirements for Pipeline Enforcement
+export const STAGE_ORDER: ProjectStage[] = [
+  'SETUP',
+  'ACCOUNTS_CONNECTED',
+  'ASSETS_READY',
+  'ANALYSIS_PASSED',
+  'READY_TO_LAUNCH',
+  'LIVE',
+];
+
+export const STAGE_REQUIREMENTS: Record<ProjectStage, string> = {
+  SETUP: 'Create a project to get started',
+  ACCOUNTS_CONNECTED: 'Connect at least one ad account',
+  ASSETS_READY: 'Upload at least one asset',
+  ANALYSIS_PASSED: 'Run pre-launch analysis and pass all checks',
+  READY_TO_LAUNCH: 'Configure your launch settings',
+  LIVE: 'Campaign is live',
+};
+
+export const PAGE_REQUIRED_STAGES: Record<string, ProjectStage[]> = {
+  '/dashboard': ['SETUP'],
+  '/connections': ['SETUP'],
+  '/assets': ['SETUP'],
+  '/analyze': ['ASSETS_READY'],
+  '/launch': ['ANALYSIS_PASSED'],
+  '/monitoring': ['LIVE'],
+  '/recovery': ['LIVE'],
+  '/rules': ['ACCOUNTS_CONNECTED'],
+  '/history': ['SETUP'],
+};

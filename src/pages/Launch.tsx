@@ -8,6 +8,7 @@ import { Switch } from '@/components/ui/switch';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useProjectStore } from '@/stores/projectStore';
 import { useToast } from '@/hooks/use-toast';
+import { ProjectGate, useLaunchReadiness, DisabledReason } from '@/components/common/ProjectGate';
 import { PlatformBadge } from '@/components/common/PlatformBadge';
 import type { Platform, Campaign } from '@/types';
 import { 
@@ -27,7 +28,7 @@ const objectives = [
   { value: 'ROAS', label: 'Return on Ad Spend', description: 'Optimize for revenue' },
 ];
 
-export default function Launch() {
+function LaunchContent() {
   const [selectedPlatforms, setSelectedPlatforms] = useState<Platform[]>([]);
   const [campaignName, setCampaignName] = useState('');
   const [budget, setBudget] = useState('');
@@ -36,8 +37,9 @@ export default function Launch() {
   const [isLaunching, setIsLaunching] = useState(false);
   
   const navigate = useNavigate();
-  const { currentProject, addCampaign } = useProjectStore();
+  const { currentProject, addCampaign, assets, hasApprovedAssets } = useProjectStore();
   const { toast } = useToast();
+  const { canLaunch, reasons } = useLaunchReadiness();
 
   const platforms: Platform[] = ['google', 'tiktok', 'snapchat'];
 
@@ -69,6 +71,15 @@ export default function Launch() {
   };
 
   const handleLaunch = async () => {
+    if (!canLaunch) {
+      toast({
+        title: 'Launch Blocked',
+        description: reasons[0] || 'Cannot launch at this time.',
+        variant: 'destructive',
+      });
+      return;
+    }
+
     if (selectedPlatforms.length === 0) {
       toast({
         title: 'No Platforms Selected',
@@ -137,6 +148,10 @@ export default function Launch() {
     }
   };
 
+  const approvedAssets = assets.filter(
+    a => a.projectId === currentProject?.id && a.status === 'APPROVED'
+  );
+
   return (
     <div className="mx-auto max-w-3xl space-y-8">
       {/* Header */}
@@ -146,6 +161,55 @@ export default function Launch() {
           Configure and launch your ad campaigns across platforms.
         </p>
       </div>
+
+      {/* Launch Readiness Status */}
+      {!canLaunch && (
+        <DisabledReason reasons={reasons} />
+      )}
+
+      {/* Approved Assets Summary */}
+      <Card className="border-border bg-card">
+        <CardHeader>
+          <CardTitle>Approved Assets</CardTitle>
+          <CardDescription>
+            {approvedAssets.length} approved asset(s) will be used for this campaign.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          {approvedAssets.length > 0 ? (
+            <div className="space-y-2">
+              {approvedAssets.slice(0, 3).map(asset => (
+                <div key={asset.id} className="flex items-center gap-3 rounded-lg border border-border p-3">
+                  <div className="flex h-8 w-8 items-center justify-center rounded bg-success/10">
+                    <Check className="h-4 w-4 text-success" />
+                  </div>
+                  <div className="flex-1">
+                    <p className="text-sm font-medium text-foreground">{asset.name}</p>
+                    <p className="text-xs text-muted-foreground capitalize">{asset.type}</p>
+                  </div>
+                </div>
+              ))}
+              {approvedAssets.length > 3 && (
+                <p className="text-sm text-muted-foreground">
+                  +{approvedAssets.length - 3} more approved asset(s)
+                </p>
+              )}
+            </div>
+          ) : (
+            <div className="rounded-lg border border-destructive/20 bg-destructive/5 p-4">
+              <div className="flex items-center gap-3">
+                <AlertTriangle className="h-5 w-5 text-destructive" />
+                <div>
+                  <p className="font-medium text-foreground">No Approved Assets</p>
+                  <p className="text-sm text-muted-foreground">
+                    Run pre-launch analysis to approve assets before launching.
+                  </p>
+                </div>
+              </div>
+            </div>
+          )}
+        </CardContent>
+      </Card>
 
       {/* Platform Selection */}
       <Card className="border-border bg-card">
@@ -158,19 +222,20 @@ export default function Launch() {
         <CardContent className="space-y-4">
           {platforms.map(platform => {
             const connection = getConnectionForPlatform(platform);
-            const canLaunch = canLaunchOnPlatform(platform);
+            const platformCanLaunch = canLaunchOnPlatform(platform);
             const isSelected = selectedPlatforms.includes(platform);
+            const isDisabled = !canLaunch || !platformCanLaunch;
             
             return (
               <div
                 key={platform}
-                onClick={() => togglePlatform(platform)}
+                onClick={() => !isDisabled && togglePlatform(platform)}
                 className={cn(
-                  'flex cursor-pointer items-center justify-between rounded-lg border p-4 transition-all',
+                  'flex items-center justify-between rounded-lg border p-4 transition-all',
                   isSelected
                     ? 'border-primary bg-primary/5'
-                    : canLaunch
-                      ? 'border-border hover:border-primary/50'
+                    : platformCanLaunch && canLaunch
+                      ? 'border-border hover:border-primary/50 cursor-pointer'
                       : 'cursor-not-allowed border-border bg-muted/30 opacity-60'
                 )}
               >
@@ -191,14 +256,16 @@ export default function Launch() {
                     <p className="font-medium text-foreground capitalize">{platform} Ads</p>
                     {!connection ? (
                       <p className="text-sm text-muted-foreground">Not connected</p>
-                    ) : !canLaunch ? (
+                    ) : !platformCanLaunch ? (
                       <p className="text-sm text-warning">Limited access - Launch disabled</p>
+                    ) : !canLaunch ? (
+                      <p className="text-sm text-muted-foreground">Resolve issues above first</p>
                     ) : (
                       <p className="text-sm text-success">Ready to launch</p>
                     )}
                   </div>
                 </div>
-                {!canLaunch && connection && (
+                {!platformCanLaunch && connection && (
                   <AlertTriangle className="h-5 w-5 text-warning" />
                 )}
               </div>
@@ -223,6 +290,7 @@ export default function Launch() {
               placeholder="Summer Sale 2024"
               value={campaignName}
               onChange={(e) => setCampaignName(e.target.value)}
+              disabled={!canLaunch}
             />
           </div>
 
@@ -237,13 +305,14 @@ export default function Launch() {
                 value={budget}
                 onChange={(e) => setBudget(e.target.value)}
                 className="pl-10"
+                disabled={!canLaunch}
               />
             </div>
           </div>
 
           <div className="space-y-2">
             <Label>Optimization Objective</Label>
-            <Select value={objective} onValueChange={(v) => setObjective(v as any)}>
+            <Select value={objective} onValueChange={(v) => setObjective(v as any)} disabled={!canLaunch}>
               <SelectTrigger>
                 <SelectValue />
               </SelectTrigger>
@@ -280,34 +349,50 @@ export default function Launch() {
           <Switch
             checked={softLaunch}
             onCheckedChange={setSoftLaunch}
+            disabled={!canLaunch}
           />
         </CardContent>
       </Card>
 
       {/* Launch Button */}
-      <div className="flex justify-end gap-4">
-        <Button variant="outline" onClick={() => navigate('/analyze')}>
-          Run Pre-Launch Analysis
-        </Button>
-        <Button 
-          variant="glow" 
-          size="lg"
-          onClick={handleLaunch}
-          disabled={isLaunching || selectedPlatforms.length === 0}
-        >
-          {isLaunching ? (
-            <>
-              <Zap className="mr-2 h-5 w-5 animate-pulse" />
-              Launching...
-            </>
-          ) : (
-            <>
-              <Rocket className="mr-2 h-5 w-5" />
-              Launch Campaign
-            </>
-          )}
-        </Button>
+      <div className="flex flex-col gap-4">
+        {!canLaunch && (
+          <p className="text-center text-sm text-muted-foreground">
+            Resolve the issues above to enable launch
+          </p>
+        )}
+        <div className="flex justify-end gap-4">
+          <Button variant="outline" onClick={() => navigate('/analyze')}>
+            Run Pre-Launch Analysis
+          </Button>
+          <Button 
+            variant="glow" 
+            size="lg"
+            onClick={handleLaunch}
+            disabled={isLaunching || !canLaunch || selectedPlatforms.length === 0}
+          >
+            {isLaunching ? (
+              <>
+                <Zap className="mr-2 h-5 w-5 animate-pulse" />
+                Launching...
+              </>
+            ) : (
+              <>
+                <Rocket className="mr-2 h-5 w-5" />
+                Launch Campaign
+              </>
+            )}
+          </Button>
+        </div>
       </div>
     </div>
+  );
+}
+
+export default function Launch() {
+  return (
+    <ProjectGate requiredStage="ANALYSIS_PASSED">
+      <LaunchContent />
+    </ProjectGate>
   );
 }

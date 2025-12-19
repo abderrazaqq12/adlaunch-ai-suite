@@ -4,6 +4,7 @@ import { StatusBadge } from '@/components/common/StatusBadge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { useProjectStore } from '@/stores/projectStore';
+import { ProjectGate } from '@/components/common/ProjectGate';
 import { Link } from 'react-router-dom';
 import {
   DollarSign,
@@ -16,7 +17,7 @@ import {
   Activity,
 } from 'lucide-react';
 
-export default function Dashboard() {
+function DashboardContent() {
   const { currentProject, campaigns } = useProjectStore();
 
   // Calculate metrics from campaigns
@@ -206,5 +207,13 @@ export default function Dashboard() {
         </CardContent>
       </Card>
     </div>
+  );
+}
+
+export default function Dashboard() {
+  return (
+    <ProjectGate>
+      <DashboardContent />
+    </ProjectGate>
   );
 }
