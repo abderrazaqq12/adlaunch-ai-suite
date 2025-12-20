@@ -1,7 +1,11 @@
 import { BaseWorker } from './base'
 import { ExecutionResult } from './types'
+import { GoogleOAuthService } from '../lib/google/oauth'
+import { GoogleAdsClient } from '../lib/google/client'
 
 export class GoogleAdsWorker extends BaseWorker {
+    private oauth = new GoogleOAuthService()
+
     async execute(payload: any, accountId: string): Promise<ExecutionResult> {
         try {
             // 1. Budget Safety
@@ -9,38 +13,58 @@ export class GoogleAdsWorker extends BaseWorker {
 
             // 2. Soft Launch Mode
             if (this.isSoftLaunch(accountId)) {
-                // Force optimization to CONVERSIONS but with low tCPA or Maximize Conversions
-                payload.bidStrategy = 'MAXIMIZE_CONVERSIONS'
+                // Force optimization settings for soft launch if needed
+                payload.forceSoftLaunch = true
             }
 
-            // 3. Construct Real Payload (Mocked Structure)
-            // In a real app, this would use google-ads-api library
-            const googlePayload = {
+            // 3. Auth & Client Setup
+            // In a real flow, we need to get the user's refresh token from DB based on accountId or projectId.
+            // For this implementation, we assume it's passed in payload.credentials for now OR strict failure.
+            const refreshToken = payload.credentials?.refreshToken
+            if (!refreshToken) {
+                // Strict failure
+                return {
+                    success: false,
+                    error: 'Missing Google Ads Refresh Token. Cannot Execute.'
+                }
+            }
+
+            const tokens = await this.oauth.refreshToken(refreshToken)
+            const client = new GoogleAdsClient(
+                process.env.GOOGLE_DEVELOPER_TOKEN || '',
+                accountId,
+                tokens.access_token
+            )
+
+            // 4. Validate Permissions
+            const hasPerms = await client.validatePermissions()
+            if (!hasPerms) {
+                return {
+                    success: false,
+                    error: 'SKIPPED_NO_PERMISSION: Cannot create campaigns.'
+                }
+            }
+
+            // 5. Execute Real Creation
+            console.log('[GoogleAdsWorker] Creating Real Demand Gen Campaign...')
+            const resourceName = await client.createDemandGenCampaign({
                 customerId: accountId,
-                campaign: {
-                    name: payload.adName,
-                    advertisingChannelType: 'DEMAND_GEN', // Demand Gen Campaign
-                    status: 'PAUSED', // Safety first
-                    campaignBudget: {
-                        amountMicros: safeBudget * 1000000
-                    }
-                },
-                // ... AssetGroups, etc.
-            }
-
-            // 4. Execute (Simulated)
-            console.log('[GoogleAdsWorker] Executing real API call with safe budget:', safeBudget)
-            // await googleAdsApi.createCampaign(googlePayload)
+                name: payload.adName || 'AdLaunch AI Campaign',
+                budgetMicros: safeBudget * 1000000,
+                status: 'PAUSED' // Safety
+            })
 
             return {
                 success: true,
-                platformId: 'google_cid_' + Date.now(),
-                metadata: { budgetEnforced: safeBudget, mode: 'SOFT_LAUNCH' }
+                platformId: resourceName,
+                metadata: { budgetEnforced: safeBudget, mode: 'SOFT_LAUNCH', resourceName }
             }
         } catch (e: any) {
+            console.error('[GoogleAdsWorker] Execution Failed', e)
             return {
                 success: false,
-                error: e.message
+                error: e.message || 'Unknown Google Ads Error',
+                metadata: { details: e.context }
             }
         }
     }
