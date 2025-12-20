@@ -194,7 +194,36 @@ async function runTests() {
     console.log('Status:', res9.status)
     const body9 = await res9.json()
     console.log('Body (Should show auto-repair):', JSON.stringify(body9, null, 2))
-    console.log('Expected: Creative should be auto-repaired (guaranteed->planned, 100%->effective, cure->help)')
+    console.log('Expected: Creative should be auto-repaired (guaranteed->designed to support, 100%->effective, cure->help)')
+
+    // 10. Test HARD Violation (No Replacement)
+    console.log('\n10. Testing HARD Violation - No Replacement Allowed')
+    const hardViolationPayload = {
+        idempotency_key: 'hard_violation_run_1',
+        campaign_intent: {
+            name: 'Hard Violation Test',
+            budget: 100,
+            creatives: [
+                { id: 'c_hard', type: 'text', content: { headline: 'Before/after cure guaranteed!' } }
+            ]
+        },
+        execution_status: 'READY',
+        policy_risk_score: 5,
+        targets: [
+            { platform: 'google', accounts: ['acc_G_hard'] }
+        ]
+    }
+
+    const res10 = await app.request('/api/brain/v1/launch/run', {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(hardViolationPayload)
+    })
+
+    console.log('Status:', res10.status)
+    const body10 = await res10.json()
+    console.log('Body (Should be BLOCKED - HARD violation):', JSON.stringify(body10, null, 2))
+    console.log('Expected: Creative excluded without replacement attempt (contains "before/after" and "cure")')
 }
 
 runTests().catch(console.error)

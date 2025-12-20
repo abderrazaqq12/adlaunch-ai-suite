@@ -50,23 +50,33 @@ export class ComplianceGuard {
         const excludedCreatives: { id: string, reasons: string[] }[] = []
         let repairedCount = 0
 
-        // 1. Scan Creatives with Auto-Replacement
+        // 1. Scan Creatives with Auto-Replacement (Severity-Gated)
         for (const creative of creatives) {
             const scan = this.scanCreative(creative, platform)
 
             if (scan.status === 'BLOCKED') {
-                // Attempt auto-replacement
-                const replacement = this.replacer.replace(creative, scan.reasons)
-                const reScan = this.scanCreative(replacement, platform)
+                // Check severity before attempting replacement
+                const severity = this.replacer.classifyViolation(creative)
 
-                if (reScan.status === 'COMPLIANT') {
-                    // Replacement succeeded
-                    allowedCreatives.push(replacement)
-                    repairedCount++
-                    console.log(`[ComplianceGuard] Auto-repaired creative ${creative.id} -> ${replacement.id}`)
+                if (severity === 'HARD') {
+                    // HARD violations - no replacement allowed
+                    excludedCreatives.push({ id: creative.id, reasons: [...scan.reasons, 'HARD_PROHIBITED'] })
+                    console.log(`[ComplianceGuard] HARD violation - excluding creative ${creative.id} without replacement`)
                 } else {
-                    // Replacement still blocked
-                    excludedCreatives.push({ id: creative.id, reasons: scan.reasons })
+                    // SOFT violations - attempt auto-replacement
+                    const replacement = this.replacer.replace(creative, scan.reasons, platform as 'google' | 'tiktok' | 'snap')
+                    const reScan = this.scanCreative(replacement, platform)
+
+                    if (reScan.status === 'COMPLIANT') {
+                        // Replacement succeeded
+                        allowedCreatives.push(replacement)
+                        repairedCount++
+                        console.log(`[ComplianceGuard] Auto-repaired creative ${creative.id} -> ${replacement.id}`)
+                    } else {
+                        // Replacement still blocked
+                        excludedCreatives.push({ id: creative.id, reasons: scan.reasons })
+                        console.log(`[ComplianceGuard] Replacement failed for ${creative.id} - still non-compliant`)
+                    }
                 }
             } else {
                 allowedCreatives.push(creative)
