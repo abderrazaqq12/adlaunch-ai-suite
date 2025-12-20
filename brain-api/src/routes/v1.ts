@@ -130,5 +130,34 @@ app.post('/launch/run', zValidator('json', launchRunSchema), async (c) => {
     return c.json(result)
 })
 
+// --- Automation ---
+import { AutomationRulesEngine } from '../lib/adlaunch-ai/automation/engine'
+
+const automationEngine = new AutomationRulesEngine(memory)
+
+// POST /automation/run - Trigger automation evaluation
+app.post('/automation/run', async (c) => {
+    const projectId = c.req.header('X-Project-Id')!
+
+    const logs = await automationEngine.run(projectId)
+    return c.json({
+        success: true,
+        actionsExecuted: logs.length,
+        logs
+    })
+})
+
+// GET /automation/logs - Retrieve automation audit logs
+app.get('/automation/logs', async (c) => {
+    const projectId = c.req.header('X-Project-Id')!
+    const limit = parseInt(c.req.query('limit') || '50')
+
+    const logs = await automationEngine.getLogs(projectId, limit)
+    return c.json({
+        logs,
+        count: logs.length
+    })
+})
+
 export default app
 
