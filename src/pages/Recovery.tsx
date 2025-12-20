@@ -173,9 +173,7 @@ function DisapprovedCampaignCard({ campaign }: { campaign: Campaign }) {
           ) : (
             <p className="text-sm text-muted-foreground">No alternatives generated yet.</p>
           )}
-          </div>
         </div>
-
         {/* Relaunch Button */}
         <Button
           onClick={handleRelaunch}
