@@ -7,6 +7,11 @@ export type RuleActionType =
     | 'STOP_PLATFORM'
     | 'REDUCE_BUDGET'
 
+export type SkipReason =
+    | 'INSUFFICIENT_DATA'
+    | 'USER_PAUSED'
+    | 'COOLDOWN_ACTIVE'
+
 export interface CampaignSnapshot {
     platform: Platform
     accountId: string
@@ -50,6 +55,7 @@ export interface AutomationLog {
     reason: string
     success: boolean
     error?: string
+    skippedReason?: SkipReason
 }
 
 export interface CooldownEntry {

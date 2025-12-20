@@ -1,5 +1,5 @@
 import { MemoryEngine } from '../memory/index'
-import { AutomationRule, CampaignSnapshot, RuleCondition, AutomationLog, CooldownEntry, RuleActionType } from './types'
+import { AutomationRule, CampaignSnapshot, AutomationLog, CooldownEntry, SkipReason } from './types'
 import { GLOBAL_RULES } from './rules'
 
 export class AutomationRulesEngine {
@@ -13,26 +13,41 @@ export class AutomationRulesEngine {
         // 1. Retrieve campaign snapshots from memory
         const snapshots = await this.getCampaignSnapshots(projectId)
 
-        // 2. Evaluate rules for each campaign
+        // 2. Evaluate rules for each campaign (STRICT SAFETY ORDER)
         for (const snapshot of snapshots) {
-            // Skip manually paused campaigns
-            if (snapshot.campaignStatus === 'PAUSED' && !snapshot.lastActionTimestamp) {
+            let skipReason: SkipReason | null = null
+
+            // SAFETY CHECK 1: Data Hard Floor
+            if (!this.meetsDataMinimums(snapshot)) {
+                skipReason = 'INSUFFICIENT_DATA'
+            }
+
+            // SAFETY CHECK 2: User-Paused Immunity
+            if (!skipReason && snapshot.pausedByUser) {
+                skipReason = 'USER_PAUSED'
+            }
+
+            // If skipped, log and continue
+            if (skipReason) {
+                logs.push(this.createSkipLog(snapshot, skipReason))
                 continue
             }
 
+            // 3. Evaluate rules
             for (const rule of GLOBAL_RULES) {
                 if (!rule.enabled) continue
 
-                // Check cooldown
-                if (this.isInCooldown(rule.ruleId, snapshot)) {
+                // SAFETY CHECK 3: Cooldown Check
+                if (this.isInCooldown(rule.action.type, snapshot)) {
+                    logs.push(this.createSkipLog(snapshot, 'COOLDOWN_ACTIVE', rule.ruleId))
                     continue
                 }
 
-                // Evaluate conditions
+                // SAFETY CHECK 4: Rule Evaluation
                 const matched = this.evaluateConditions(rule, snapshot, snapshots)
                 if (!matched) continue
 
-                // Execute action
+                // SAFETY CHECK 5: Single Action Execution
                 const log = await this.executeAction(rule, snapshot, projectId)
                 logs.push(log)
 
@@ -47,6 +62,38 @@ export class AutomationRulesEngine {
         }
 
         return logs
+    }
+
+    private meetsDataMinimums(snapshot: CampaignSnapshot): boolean {
+        const now = Date.now()
+        const firstSpend = snapshot.firstSpendTimestamp || now
+
+        // Time-based floor: 60 minutes since first spend
+        const minutesSinceFirstSpend = (now - firstSpend) / 1000 / 60
+        if (minutesSinceFirstSpend >= 60) return true
+
+        // Impression-based floor: 1000 impressions
+        if (snapshot.impressions && snapshot.impressions >= 1000) return true
+
+        return false
+    }
+
+    private createSkipLog(
+        snapshot: CampaignSnapshot,
+        skipReason: SkipReason,
+        ruleId: string = 'system'
+    ): AutomationLog {
+        return {
+            timestamp: Date.now(),
+            ruleId,
+            platform: snapshot.platform,
+            accountId: snapshot.accountId,
+            campaignId: snapshot.campaignId,
+            action: 'PAUSE_CAMPAIGN', // Placeholder
+            reason: `Skipped: ${skipReason}`,
+            success: false,
+            skippedReason: skipReason
+        }
     }
 
     private evaluateConditions(
@@ -126,8 +173,8 @@ export class AutomationRulesEngine {
             // For now, just log
             log.success = true
 
-            // Update cooldown
-            this.setCooldown(rule.ruleId, snapshot, rule.cooldownMinutes)
+            // Update cooldown (action-specific)
+            this.setCooldown(rule.action.type, snapshot)
 
         } catch (e: any) {
             log.error = e.message
@@ -137,8 +184,8 @@ export class AutomationRulesEngine {
         return log
     }
 
-    private isInCooldown(ruleId: string, snapshot: CampaignSnapshot): boolean {
-        const key = this.getCooldownKey(ruleId, snapshot)
+    private isInCooldown(actionType: string, snapshot: CampaignSnapshot): boolean {
+        const key = this.getCooldownKey(actionType, snapshot)
         const entry = this.cooldowns.get(key)
 
         if (!entry) return false
@@ -146,20 +193,23 @@ export class AutomationRulesEngine {
         const now = Date.now()
         const elapsed = (now - entry.lastExecuted) / 1000 / 60 // minutes
 
-        return elapsed < GLOBAL_RULES.find(r => r.ruleId === ruleId)?.cooldownMinutes || 0
+        // Get cooldown for this action type
+        const rule = GLOBAL_RULES.find(r => r.action.type === actionType)
+        return elapsed < (rule?.cooldownMinutes || 0)
     }
 
-    private setCooldown(ruleId: string, snapshot: CampaignSnapshot, minutes: number): void {
-        const key = this.getCooldownKey(ruleId, snapshot)
+    private setCooldown(actionType: string, snapshot: CampaignSnapshot): void {
+        const key = this.getCooldownKey(actionType, snapshot)
         this.cooldowns.set(key, {
-            ruleId,
+            ruleId: actionType,
             targetKey: key,
             lastExecuted: Date.now()
         })
     }
 
-    private getCooldownKey(ruleId: string, snapshot: CampaignSnapshot): string {
-        return `${ruleId}:${snapshot.platform}:${snapshot.accountId}:${snapshot.campaignId}`
+    private getCooldownKey(actionType: string, snapshot: CampaignSnapshot): string {
+        // Platform-scoped, campaign-scoped, action-scoped cooldown
+        return `${actionType}:${snapshot.platform}:${snapshot.accountId}:${snapshot.campaignId}`
     }
 
     private async getCampaignSnapshots(projectId: string): Promise<CampaignSnapshot[]> {

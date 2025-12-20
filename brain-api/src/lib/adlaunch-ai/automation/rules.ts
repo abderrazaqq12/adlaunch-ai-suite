@@ -1,5 +1,12 @@
 import { AutomationRule } from './types'
 
+// Action-specific cooldowns (Phase 1.1)
+export const ACTION_COOLDOWNS: Record<string, number> = {
+    'PAUSE_CAMPAIGN': 180,        // 3 hours
+    'ROTATE_BACKUP_CREATIVE': 60, // 1 hour
+    'STOP_PLATFORM': 360          // 6 hours
+}
+
 // Global Rules (Phase 1)
 export const GLOBAL_RULES: AutomationRule[] = [
     // Rule 1: No Sales Burn
@@ -13,7 +20,7 @@ export const GLOBAL_RULES: AutomationRule[] = [
         action: {
             type: 'PAUSE_CAMPAIGN'
         },
-        cooldownMinutes: 60, // Don't re-evaluate for 1 hour
+        cooldownMinutes: ACTION_COOLDOWNS['PAUSE_CAMPAIGN'],
         enabled: true
     },
 
@@ -28,7 +35,7 @@ export const GLOBAL_RULES: AutomationRule[] = [
         action: {
             type: 'ROTATE_BACKUP_CREATIVE'
         },
-        cooldownMinutes: 120, // 2 hours
+        cooldownMinutes: ACTION_COOLDOWNS['ROTATE_BACKUP_CREATIVE'],
         enabled: true
     },
 
@@ -43,7 +50,7 @@ export const GLOBAL_RULES: AutomationRule[] = [
         action: {
             type: 'STOP_PLATFORM'
         },
-        cooldownMinutes: 180, // 3 hours
+        cooldownMinutes: ACTION_COOLDOWNS['STOP_PLATFORM'],
         enabled: true
     }
 ]
