@@ -1,6 +1,7 @@
 import { MemoryEngine } from '../memory/index'
 import { Creative } from '../orchestrator/types'
 import { CreativeReplacementEngine } from '../engines/replacement'
+import { CreativeScoreEngine, ScoredCreative } from '../engines/scoring'
 
 export interface ComplianceResult {
     passed: boolean
@@ -13,6 +14,7 @@ export interface FilterResult {
     allowedCount: number
     totalCount: number
     repairedCount: number
+    scoredCreatives: ScoredCreative[]
 }
 
 export class ComplianceGuard {
@@ -108,16 +110,20 @@ export class ComplianceGuard {
             })
         }
 
-        // Return filtered campaign
+        // 4. Score and Select Creatives
+        const scoredCreatives = await this.scorer.score(allowedCreatives, platform as 'google' | 'tiktok' | 'snap', projectId)
+
+        // Return filtered campaign with scored creatives
         return {
             filteredCampaign: {
                 ...campaign,
-                creatives: allowedCreatives
+                creatives: scoredCreatives.filter(c => c.status === 'ACTIVE') // Only ACTIVE creatives in campaign
             },
             excludedCreatives,
-            allowedCount: creatives.length > 0 ? allowedCreatives.length : 1, // 1 because of fallback above
+            allowedCount: creatives.length > 0 ? allowedCreatives.length : 1,
             totalCount: creatives.length > 0 ? creatives.length : 1,
-            repairedCount
+            repairedCount,
+            scoredCreatives
         }
     }
 
