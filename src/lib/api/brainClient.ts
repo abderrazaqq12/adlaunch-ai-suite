@@ -1,0 +1,357 @@
+/**
+ * Antigravity Brain API Client
+ * 
+ * Central API gateway for all backend calls to the Brain service.
+ * All methods handle errors consistently using the unified error model.
+ */
+
+import type { 
+  Platform, 
+  CampaignIntent, 
+  PlatformConfig, 
+  PlatformPermissions,
+  ExecutionStatus,
+  CampaignMetrics,
+  AutomationRule,
+} from '@/types';
+
+// ============================================
+// CONFIGURATION
+// ============================================
+
+const BRAIN_API_BASE_URL = import.meta.env.VITE_BRAIN_API_BASE_URL || '';
+const BRAIN_API_TOKEN = import.meta.env.VITE_BRAIN_API_TOKEN || '';
+
+// ============================================
+// ERROR HANDLING
+// ============================================
+
+export interface BrainAPIError {
+  error: string;
+  message: string;
+  context?: Record<string, unknown>;
+}
+
+export class BrainClientError extends Error {
+  public readonly error: string;
+  public readonly context?: Record<string, unknown>;
+
+  constructor(apiError: BrainAPIError) {
+    super(apiError.message);
+    this.name = 'BrainClientError';
+    this.error = apiError.error;
+    this.context = apiError.context;
+  }
+}
+
+function generateRequestId(): string {
+  return `req-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
+}
+
+async function handleResponse<T>(response: Response): Promise<T> {
+  if (!response.ok) {
+    let errorData: BrainAPIError;
+    try {
+      errorData = await response.json();
+    } catch {
+      errorData = {
+        error: 'NETWORK_ERROR',
+        message: `Request failed with status ${response.status}: ${response.statusText}`,
+        context: { status: response.status },
+      };
+    }
+    throw new BrainClientError(errorData);
+  }
+  return response.json();
+}
+
+function buildHeaders(projectId: string): HeadersInit {
+  return {
+    'Content-Type': 'application/json',
+    'Authorization': `Bearer ${BRAIN_API_TOKEN}`,
+    'X-Project-Id': projectId,
+    'X-Request-Id': generateRequestId(),
+  };
+}
+
+// ============================================
+// API TYPES
+// ============================================
+
+export interface InterpretPermissionsRequest {
+  platform: Platform;
+  account: {
+    id: string;
+    name: string;
+    tokenMetadata: Record<string, unknown>;
+  };
+}
+
+export interface InterpretPermissionsResponse {
+  permissions: PlatformPermissions;
+  status: 'connected' | 'limited_access';
+  warnings?: string[];
+}
+
+export interface TranslateCampaignRequest {
+  intent: CampaignIntent;
+  platform: Platform;
+  accountId: string;
+  platformConfig: PlatformConfig[Platform];
+}
+
+export interface TranslateCampaignResponse {
+  translatedCampaign: {
+    id: string;
+    platformCampaignId?: string;
+    name: string;
+    platform: Platform;
+    accountId: string;
+    status: 'pending' | 'active' | 'rejected';
+    platformSpecificData: Record<string, unknown>;
+  };
+  warnings?: string[];
+}
+
+export interface DecideLaunchRequest {
+  executionStatus: ExecutionStatus;
+  policyRiskScore: number;
+  platform: Platform;
+  permissions: PlatformPermissions;
+}
+
+export interface DecideLaunchResponse {
+  decision: 'proceed' | 'block' | 'review';
+  reason: string;
+  riskLevel: 'low' | 'medium' | 'high';
+  recommendations?: string[];
+}
+
+export interface OptimizeRequest {
+  platform: Platform;
+  metrics: CampaignMetrics;
+  rules: AutomationRule[];
+}
+
+export interface OptimizeResponse {
+  actions: {
+    id: string;
+    action: string;
+    reason: string;
+    result?: string;
+    timestamp: string;
+  }[];
+  recommendations?: string[];
+}
+
+export interface RecoverRequest {
+  platform: Platform;
+  disapprovalReason: string;
+  originalAd: {
+    id: string;
+    content: string;
+    type: 'video' | 'image' | 'text';
+  };
+}
+
+export interface RecoverResponse {
+  alternatives: {
+    id: string;
+    original: string;
+    suggestion: string;
+    reason: string;
+    confidence: number;
+  }[];
+  canRelaunch: boolean;
+}
+
+export interface MemoryWriteRequest {
+  platform: Platform;
+  accountId: string;
+  event: 'launch' | 'pause' | 'resume' | 'disapproval' | 'recovery' | 'optimization';
+  details: Record<string, unknown>;
+}
+
+export interface MemoryWriteResponse {
+  success: boolean;
+  eventId: string;
+}
+
+// ============================================
+// API CLIENT
+// ============================================
+
+export const brainClient = {
+  /**
+   * Interpret permissions from OAuth token metadata
+   * Called after OAuth connect flow completes
+   */
+  async interpretPermissions(
+    projectId: string,
+    request: InterpretPermissionsRequest
+  ): Promise<InterpretPermissionsResponse> {
+    if (!BRAIN_API_BASE_URL) {
+      // Fallback for development without backend
+      console.warn('[BrainClient] No API URL configured, using fallback');
+      return {
+        permissions: {
+          canAnalyze: true,
+          canLaunch: Math.random() > 0.3,
+          canOptimize: Math.random() > 0.5,
+        },
+        status: Math.random() > 0.3 ? 'connected' : 'limited_access',
+      };
+    }
+
+    const response = await fetch(`${BRAIN_API_BASE_URL}/v1/permissions/interpret`, {
+      method: 'POST',
+      headers: buildHeaders(projectId),
+      body: JSON.stringify(request),
+    });
+
+    return handleResponse<InterpretPermissionsResponse>(response);
+  },
+
+  /**
+   * Translate a Campaign Intent into a platform-specific campaign
+   */
+  async translateCampaign(
+    projectId: string,
+    request: TranslateCampaignRequest
+  ): Promise<TranslateCampaignResponse> {
+    if (!BRAIN_API_BASE_URL) {
+      console.warn('[BrainClient] No API URL configured, using fallback');
+      return {
+        translatedCampaign: {
+          id: `campaign-${Date.now()}-${request.platform}-${request.accountId}`,
+          name: `${request.intent.name} - ${request.platform}`,
+          platform: request.platform,
+          accountId: request.accountId,
+          status: 'pending',
+          platformSpecificData: {},
+        },
+      };
+    }
+
+    const response = await fetch(`${BRAIN_API_BASE_URL}/v1/translator/campaign`, {
+      method: 'POST',
+      headers: buildHeaders(projectId),
+      body: JSON.stringify(request),
+    });
+
+    return handleResponse<TranslateCampaignResponse>(response);
+  },
+
+  /**
+   * Get AI decision on whether to proceed with launch
+   */
+  async decideLaunch(
+    projectId: string,
+    request: DecideLaunchRequest
+  ): Promise<DecideLaunchResponse> {
+    if (!BRAIN_API_BASE_URL) {
+      console.warn('[BrainClient] No API URL configured, using fallback');
+      const canProceed = request.policyRiskScore < 70 && 
+                         request.executionStatus !== 'BLOCKED' &&
+                         request.permissions.canLaunch;
+      return {
+        decision: canProceed ? 'proceed' : 'block',
+        reason: canProceed 
+          ? 'All checks passed' 
+          : 'Risk score too high or permissions insufficient',
+        riskLevel: request.policyRiskScore < 30 ? 'low' : 
+                   request.policyRiskScore < 70 ? 'medium' : 'high',
+      };
+    }
+
+    const response = await fetch(`${BRAIN_API_BASE_URL}/v1/decider/launch`, {
+      method: 'POST',
+      headers: buildHeaders(projectId),
+      body: JSON.stringify(request),
+    });
+
+    return handleResponse<DecideLaunchResponse>(response);
+  },
+
+  /**
+   * Get AI optimization recommendations
+   */
+  async optimize(
+    projectId: string,
+    request: OptimizeRequest
+  ): Promise<OptimizeResponse> {
+    if (!BRAIN_API_BASE_URL) {
+      console.warn('[BrainClient] No API URL configured, using fallback');
+      return {
+        actions: [],
+        recommendations: ['No backend configured - optimization unavailable'],
+      };
+    }
+
+    const response = await fetch(`${BRAIN_API_BASE_URL}/v1/optimizer/analyze`, {
+      method: 'POST',
+      headers: buildHeaders(projectId),
+      body: JSON.stringify(request),
+    });
+
+    return handleResponse<OptimizeResponse>(response);
+  },
+
+  /**
+   * Generate AI-powered recovery alternatives for disapproved ads
+   */
+  async recover(
+    projectId: string,
+    request: RecoverRequest
+  ): Promise<RecoverResponse> {
+    if (!BRAIN_API_BASE_URL) {
+      console.warn('[BrainClient] No API URL configured, using fallback');
+      return {
+        alternatives: [
+          {
+            id: '1',
+            original: request.originalAd.content,
+            suggestion: 'AI-generated safe variant (backend not configured)',
+            reason: 'Fallback response - connect Brain API for real suggestions',
+            confidence: 0.5,
+          },
+        ],
+        canRelaunch: true,
+      };
+    }
+
+    const response = await fetch(`${BRAIN_API_BASE_URL}/v1/recovery/generate`, {
+      method: 'POST',
+      headers: buildHeaders(projectId),
+      body: JSON.stringify(request),
+    });
+
+    return handleResponse<RecoverResponse>(response);
+  },
+
+  /**
+   * Write an event to the platform memory
+   */
+  async memoryWrite(
+    projectId: string,
+    request: MemoryWriteRequest
+  ): Promise<MemoryWriteResponse> {
+    if (!BRAIN_API_BASE_URL) {
+      console.warn('[BrainClient] No API URL configured, using fallback');
+      return {
+        success: true,
+        eventId: `evt-${Date.now()}`,
+      };
+    }
+
+    const response = await fetch(`${BRAIN_API_BASE_URL}/v1/memory/write`, {
+      method: 'POST',
+      headers: buildHeaders(projectId),
+      body: JSON.stringify(request),
+    });
+
+    return handleResponse<MemoryWriteResponse>(response);
+  },
+};
+
+export default brainClient;

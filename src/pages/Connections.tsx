@@ -4,6 +4,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { StatusBadge } from '@/components/common/StatusBadge';
 import { useProjectStore } from '@/stores/projectStore';
 import { useToast } from '@/hooks/use-toast';
+import { brainClient, BrainClientError } from '@/lib/api';
 import type { Platform, AdAccountConnection, PlatformPermissions } from '@/types';
 import { Check, X, AlertTriangle, Link2, ExternalLink, RefreshCw, Plus, Trash2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
@@ -54,11 +55,21 @@ function PermissionIndicator({ label, allowed }: { label: string; allowed: boole
 
 function AccountItem({ 
   connection, 
-  onDisconnect 
+  onDisconnect,
+  onRefresh,
 }: { 
   connection: AdAccountConnection; 
   onDisconnect: () => void;
+  onRefresh: () => void;
 }) {
+  const [isRefreshing, setIsRefreshing] = useState(false);
+
+  const handleRefresh = async () => {
+    setIsRefreshing(true);
+    await onRefresh();
+    setIsRefreshing(false);
+  };
+
   return (
     <div className="rounded-lg border border-border bg-background p-4 space-y-3">
       <div className="flex items-start justify-between">
@@ -88,8 +99,14 @@ function AccountItem({
 
       {/* Actions */}
       <div className="flex gap-2">
-        <Button variant="outline" size="sm" className="flex-1">
-          <RefreshCw className="mr-2 h-3 w-3" />
+        <Button 
+          variant="outline" 
+          size="sm" 
+          className="flex-1"
+          onClick={handleRefresh}
+          disabled={isRefreshing}
+        >
+          <RefreshCw className={cn("mr-2 h-3 w-3", isRefreshing && "animate-spin")} />
           Refresh
         </Button>
         <Button 
@@ -107,7 +124,7 @@ function AccountItem({
 
 function PlatformSection({ platform }: { platform: Platform }) {
   const [isConnecting, setIsConnecting] = useState(false);
-  const { currentProject, addConnection, removeConnection } = useProjectStore();
+  const { currentProject, addConnection, removeConnection, updateConnection } = useProjectStore();
   const { toast } = useToast();
   
   const details = platformDetails[platform];
@@ -127,39 +144,106 @@ function PlatformSection({ platform }: { platform: Platform }) {
     setIsConnecting(true);
     
     try {
-      // TODO: Replace with actual OAuth flow
-      await new Promise(resolve => setTimeout(resolve, 2000));
-      
-      // Simulated connection response - replace with real API
+      // Simulate OAuth flow - in production this would redirect to platform OAuth
+      // For now, we simulate the token metadata response
+      const mockTokenMetadata = {
+        access_token: `mock-token-${Date.now()}`,
+        refresh_token: `mock-refresh-${Date.now()}`,
+        expires_in: 3600,
+        scope: 'ads_management',
+      };
+
       const accountNumber = accountCount + 1;
-      const mockConnection: AdAccountConnection = {
+      const accountId = `${platform.toUpperCase()}-${Math.random().toString(36).substring(7).toUpperCase()}`;
+      const accountName = `${details.name} Account ${accountNumber}`;
+
+      // Call Brain API to interpret permissions from token
+      const permissionResult = await brainClient.interpretPermissions(currentProject.id, {
+        platform,
+        account: {
+          id: accountId,
+          name: accountName,
+          tokenMetadata: mockTokenMetadata,
+        },
+      });
+
+      const newConnection: AdAccountConnection = {
         id: `${platform}-${Date.now()}`,
         platform,
-        accountId: `${platform.toUpperCase()}-${Math.random().toString(36).substring(7).toUpperCase()}`,
-        accountName: `${details.name} Account ${accountNumber}`,
-        status: Math.random() > 0.3 ? 'connected' : 'limited_access',
-        permissions: {
-          canAnalyze: true,
-          canLaunch: Math.random() > 0.3,
-          canOptimize: Math.random() > 0.5,
-        },
+        accountId,
+        accountName,
+        status: permissionResult.status,
+        permissions: permissionResult.permissions,
         connectedAt: new Date().toISOString(),
       };
       
-      addConnection(currentProject.id, mockConnection);
+      addConnection(currentProject.id, newConnection);
+
+      // Write memory event
+      await brainClient.memoryWrite(currentProject.id, {
+        platform,
+        accountId,
+        event: 'launch',
+        details: {
+          action: 'account_connected',
+          accountName,
+          permissions: permissionResult.permissions,
+        },
+      }).catch(err => {
+        console.warn('[Connections] Failed to write memory event:', err);
+      });
       
       toast({
         title: 'Account Connected',
-        description: `Successfully connected ${mockConnection.accountName}.`,
+        description: `Successfully connected ${accountName}.${permissionResult.warnings?.length ? ` Warning: ${permissionResult.warnings[0]}` : ''}`,
       });
     } catch (error) {
+      const message = error instanceof BrainClientError 
+        ? error.message 
+        : `Failed to connect ${details.name}. Please try again.`;
+      
       toast({
         title: 'Connection Failed',
-        description: `Failed to connect ${details.name}. Please try again.`,
+        description: message,
         variant: 'destructive',
       });
     } finally {
       setIsConnecting(false);
+    }
+  };
+
+  const handleRefresh = async (connection: AdAccountConnection) => {
+    if (!currentProject) return;
+
+    try {
+      const permissionResult = await brainClient.interpretPermissions(currentProject.id, {
+        platform,
+        account: {
+          id: connection.accountId,
+          name: connection.accountName,
+          tokenMetadata: { refreshed: true },
+        },
+      });
+
+      updateConnection(currentProject.id, connection.id, {
+        status: permissionResult.status,
+        permissions: permissionResult.permissions,
+      });
+
+      toast({
+        title: 'Permissions Refreshed',
+        description: `Updated permissions for ${connection.accountName}.`,
+      });
+    } catch (error) {
+      const message = error instanceof BrainClientError 
+        ? error.message 
+        : 'Failed to refresh permissions.';
+      
+      toast({
+        title: 'Refresh Failed',
+        description: message,
+        variant: 'destructive',
+      });
     }
   };
 
@@ -206,6 +290,7 @@ function PlatformSection({ platform }: { platform: Platform }) {
                 key={connection.id} 
                 connection={connection}
                 onDisconnect={() => handleDisconnect(connection.id, connection.accountName)}
+                onRefresh={() => handleRefresh(connection)}
               />
             ))}
           </div>
