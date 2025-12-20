@@ -7,6 +7,7 @@ import { useToast } from '@/hooks/use-toast';
 import type { Platform, AdAccountConnection, PlatformPermissions } from '@/types';
 import { Check, X, AlertTriangle, Link2, ExternalLink, RefreshCw, Plus, Trash2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { interpretPermissions, formatBrainError } from '@/lib/api/brainClient';
 
 const platformDetails: Record<Platform, { 
   name: string; 
@@ -127,40 +128,86 @@ function PlatformSection({ platform }: { platform: Platform }) {
     setIsConnecting(true);
     
     try {
-      // TODO: Replace with actual OAuth flow
-      await new Promise(resolve => setTimeout(resolve, 2000));
+      // TODO: Replace with actual OAuth flow - for now simulate OAuth response
+      // In production, this would open OAuth popup and return token metadata
+      const oauthResponse = await simulateOAuthFlow(platform);
       
-      // Simulated connection response - replace with real API
-      const accountNumber = accountCount + 1;
-      const mockConnection: AdAccountConnection = {
+      // Call Brain API to interpret permissions from OAuth scopes
+      const permissionResult = await interpretPermissions(platform, {
+        accountId: oauthResponse.accountId,
+        accountName: oauthResponse.accountName,
+        scopes: oauthResponse.scopes,
+        role: oauthResponse.role,
+      });
+
+      // Determine connection status based on permissions
+      const status = permissionResult.permissions.canLaunch 
+        ? 'connected' 
+        : permissionResult.permissions.canAnalyze 
+          ? 'limited_access' 
+          : 'limited_access';
+      
+      const connection: AdAccountConnection = {
         id: `${platform}-${Date.now()}`,
         platform,
-        accountId: `${platform.toUpperCase()}-${Math.random().toString(36).substring(7).toUpperCase()}`,
-        accountName: `${details.name} Account ${accountNumber}`,
-        status: Math.random() > 0.3 ? 'connected' : 'limited_access',
-        permissions: {
-          canAnalyze: true,
-          canLaunch: Math.random() > 0.3,
-          canOptimize: Math.random() > 0.5,
-        },
+        accountId: oauthResponse.accountId,
+        accountName: oauthResponse.accountName,
+        status,
+        permissions: permissionResult.permissions,
         connectedAt: new Date().toISOString(),
       };
       
-      addConnection(currentProject.id, mockConnection);
+      addConnection(currentProject.id, connection);
       
-      toast({
-        title: 'Account Connected',
-        description: `Successfully connected ${mockConnection.accountName}.`,
-      });
+      // Show warning if admin access needed
+      if (permissionResult.requiredAction === 'REQUEST_ADMIN_ACCESS') {
+        toast({
+          title: 'Limited Access',
+          description: `${connection.accountName} connected with limited permissions. Request admin access for full functionality.`,
+        });
+      } else {
+        toast({
+          title: 'Account Connected',
+          description: `Successfully connected ${connection.accountName}.`,
+        });
+      }
     } catch (error) {
       toast({
         title: 'Connection Failed',
-        description: `Failed to connect ${details.name}. Please try again.`,
+        description: formatBrainError(error),
         variant: 'destructive',
       });
     } finally {
       setIsConnecting(false);
     }
+  };
+
+  // Simulated OAuth flow - replace with real OAuth implementation
+  const simulateOAuthFlow = async (platform: Platform): Promise<{
+    accountId: string;
+    accountName: string;
+    scopes: string[];
+    role?: string;
+  }> => {
+    // Simulate network delay
+    await new Promise(resolve => setTimeout(resolve, 1500));
+    
+    const accountNumber = accountCount + 1;
+    const accountId = `${platform.toUpperCase()}-${Math.random().toString(36).substring(7).toUpperCase()}`;
+    
+    // Return mock OAuth response with scopes
+    const scopesByPlatform: Record<Platform, string[]> = {
+      google: ['https://www.googleapis.com/auth/adwords'],
+      tiktok: ['ads.management', 'ads.read'],
+      snapchat: ['snapchat-marketing-api'],
+    };
+    
+    return {
+      accountId,
+      accountName: `${details.name} Account ${accountNumber}`,
+      scopes: scopesByPlatform[platform],
+      role: Math.random() > 0.3 ? 'ADMIN' : 'READ_ONLY',
+    };
   };
 
   const handleDisconnect = (connectionId: string, accountName: string) => {

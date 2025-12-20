@@ -14,6 +14,13 @@ import { PlatformBadge } from '@/components/common/PlatformBadge';
 import { ExecutionReadinessPanel } from '@/components/common/ExecutionReadinessPanel';
 import { ExecutionStatusBadge } from '@/components/common/ExecutionStatusBadge';
 import { useExecutionReadiness } from '@/hooks/useExecutionReadiness';
+import { 
+  translateCampaign, 
+  decideLaunch, 
+  memoryWrite,
+  formatBrainError,
+  type LaunchDecisionResult,
+} from '@/lib/api/brainClient';
 import type { 
   Platform, 
   Campaign, 
@@ -252,9 +259,6 @@ function LaunchContent() {
     setIsLaunching(true);
 
     try {
-      // TODO: Replace with actual API call
-      await new Promise(resolve => setTimeout(resolve, 2000));
-
       const intentId = `intent-${Date.now()}`;
       
       // Create Campaign Intent with execution status
@@ -278,9 +282,10 @@ function LaunchContent() {
 
       addCampaignIntent(intent);
 
-      // Create real campaigns only for READY accounts based on executionReadiness
+      // Process campaigns through Brain API
       let launchedCount = 0;
       const skippedDetails: string[] = [];
+      const launchErrors: string[] = [];
 
       for (const platformStatus of executionReadiness.platformStatuses) {
         const { platform, readyAccounts, blockedAccounts } = platformStatus;
@@ -290,38 +295,93 @@ function LaunchContent() {
           skippedDetails.push(`${blocked.name} (${blocked.reason})`);
         }
 
-        // Only create campaigns for ready accounts
+        // Process ready accounts through Brain API
         for (const accountId of readyAccounts) {
           const account = currentProject.connections.find(c => c.id === accountId);
           if (!account) continue;
 
-          const campaign: Campaign = {
-            id: `campaign-${Date.now()}-${platform}-${accountId}`,
-            projectId: currentProject.id,
-            intentId,
-            name: `${campaignName} - ${account.accountName}`,
-            platform,
-            accountId,
-            status: 'pending',
-            budget: parseFloat(dailyBudget),
-            objective,
-            softLaunch,
-            metrics: {
-              spend: 0,
-              impressions: 0,
-              clicks: 0,
-              conversions: 0,
-              cpc: 0,
-              cpa: 0,
-              ctr: 0,
-              roas: 0,
-            },
-            approvalStatus: 'pending',
-            createdAt: new Date().toISOString(),
-          };
+          try {
+            // 1. Translate campaign to platform-specific format
+            const translationResult = await translateCampaign(
+              intent,
+              platform,
+              account.accountId,
+              platformConfigs
+            );
 
-          addCampaign(campaign);
-          launchedCount++;
+            // Check for validation errors
+            if (translationResult.validationErrors && translationResult.validationErrors.length > 0) {
+              launchErrors.push(`${account.accountName}: ${translationResult.validationErrors.join(', ')}`);
+              continue;
+            }
+
+            // 2. Get launch decision from Brain API
+            // Calculate average policy risk from selected assets
+            const selectedAssetObjs = assets.filter(a => selectedAssetIds.includes(a.id));
+            const avgPolicyRisk = selectedAssetObjs.reduce(
+              (sum, a) => sum + (a.analysisResult?.policyRiskScore || 0),
+              0
+            ) / (selectedAssetObjs.length || 1);
+
+            const launchDecision: LaunchDecisionResult = await decideLaunch(
+              executionReadiness.status,
+              avgPolicyRisk,
+              platform,
+              account.permissions
+            );
+
+            // Handle launch decision
+            if (launchDecision.decision === 'BLOCK') {
+              launchErrors.push(`${account.accountName}: ${launchDecision.reason}`);
+              continue;
+            }
+
+            // 3. Create the campaign (either SOFT_LAUNCH or FULL_LAUNCH)
+            const campaign: Campaign = {
+              id: `campaign-${Date.now()}-${platform}-${accountId}`,
+              projectId: currentProject.id,
+              intentId,
+              name: `${campaignName} - ${account.accountName}`,
+              platform,
+              accountId,
+              status: 'pending',
+              budget: parseFloat(dailyBudget),
+              objective,
+              softLaunch: launchDecision.decision === 'SOFT_LAUNCH' || softLaunch,
+              metrics: {
+                spend: 0,
+                impressions: 0,
+                clicks: 0,
+                conversions: 0,
+                cpc: 0,
+                cpa: 0,
+                ctr: 0,
+                roas: 0,
+              },
+              approvalStatus: 'pending',
+              createdAt: new Date().toISOString(),
+            };
+
+            addCampaign(campaign);
+            launchedCount++;
+
+            // 4. Record to memory
+            await memoryWrite(platform, account.accountId, {
+              type: 'CAMPAIGN_LAUNCH',
+              platform,
+              accountId: account.accountId,
+              timestamp: new Date().toISOString(),
+              details: {
+                campaignId: campaign.id,
+                intentId,
+                decision: launchDecision.decision,
+                softLaunch: campaign.softLaunch,
+              },
+              outcome: 'positive',
+            });
+          } catch (error) {
+            launchErrors.push(`${account.accountName}: ${formatBrainError(error)}`);
+          }
         }
       }
 
@@ -334,16 +394,32 @@ function LaunchContent() {
         });
       }
 
-      toast({
-        title: 'Campaigns Launched!',
-        description: `${launchedCount} campaign(s) submitted for review.`,
-      });
+      // Show launch errors if any
+      if (launchErrors.length > 0) {
+        toast({
+          title: 'Some Launches Failed',
+          description: launchErrors.slice(0, 2).join('; '),
+          variant: 'destructive',
+        });
+      }
 
-      navigate('/monitoring');
+      if (launchedCount > 0) {
+        toast({
+          title: 'Campaigns Launched!',
+          description: `${launchedCount} campaign(s) submitted for review.`,
+        });
+        navigate('/monitoring');
+      } else {
+        toast({
+          title: 'No Campaigns Launched',
+          description: 'All campaigns were blocked or failed. Check the errors above.',
+          variant: 'destructive',
+        });
+      }
     } catch (error) {
       toast({
         title: 'Launch Failed',
-        description: 'Failed to launch campaigns. Please try again.',
+        description: formatBrainError(error),
         variant: 'destructive',
       });
     } finally {
