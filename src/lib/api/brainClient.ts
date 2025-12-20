@@ -127,6 +127,52 @@ export interface DecideLaunchResponse {
   recommendations?: string[];
 }
 
+// ============================================
+// LAUNCH RUN TYPES (Single Entry Point)
+// ============================================
+
+export type LaunchAccountStatus = 'DECIDED_FULL' | 'DECIDED_SOFT' | 'BLOCKED' | 'SKIPPED';
+
+export interface LaunchAccountResult {
+  accountId: string;
+  accountName: string;
+  status: LaunchAccountStatus;
+  campaignId?: string;
+  platformCampaignId?: string;
+  reason?: string;
+}
+
+export interface LaunchPlatformResult {
+  platform: Platform;
+  accounts: LaunchAccountResult[];
+  totalLaunched: number;
+  totalSkipped: number;
+}
+
+export interface LaunchRunRequest {
+  intent: CampaignIntent;
+  executionReadiness: {
+    status: ExecutionStatus;
+    canLaunch: boolean;
+    platformStatuses: Array<{
+      platform: Platform;
+      readyAccounts: string[];
+      blockedAccounts: Array<{ id: string; name: string; reason: string }>;
+    }>;
+  };
+  platformConfigs: PlatformConfig;
+}
+
+export interface LaunchRunResponse {
+  runId: string;
+  status: 'success' | 'partial' | 'failed';
+  platformResults: LaunchPlatformResult[];
+  totalCampaignsLaunched: number;
+  totalCampaignsSkipped: number;
+  memoryEventIds: string[];
+  warnings?: string[];
+}
+
 export interface OptimizeRequest {
   platform: Platform;
   metrics: CampaignMetrics;
@@ -244,6 +290,7 @@ export const brainClient = {
 
   /**
    * Get AI decision on whether to proceed with launch
+   * @deprecated Use launchRun() for all launch operations
    */
   async decideLaunch(
     projectId: string,
@@ -271,6 +318,71 @@ export const brainClient = {
     });
 
     return handleResponse<DecideLaunchResponse>(response);
+  },
+
+  /**
+   * SINGLE ENTRY POINT FOR LAUNCHING CAMPAIGNS
+   * 
+   * This is the only API that should be used for launching campaigns.
+   * The Brain service handles all orchestration:
+   * - Decision making per platform/account
+   * - Campaign translation
+   * - Memory logging
+   */
+  async launchRun(
+    projectId: string,
+    request: LaunchRunRequest
+  ): Promise<LaunchRunResponse> {
+    if (!BRAIN_API_BASE_URL) {
+      console.warn('[BrainClient] No API URL configured, using fallback');
+      
+      // Build fallback response based on execution readiness
+      const platformResults: LaunchPlatformResult[] = request.executionReadiness.platformStatuses.map(ps => {
+        const launchedAccounts: LaunchAccountResult[] = ps.readyAccounts.map(accountId => ({
+          accountId,
+          accountName: accountId,
+          status: request.intent.softLaunch ? 'DECIDED_SOFT' : 'DECIDED_FULL' as LaunchAccountStatus,
+          campaignId: `campaign-${Date.now()}-${ps.platform}-${accountId}`,
+          platformCampaignId: `plat-${Date.now()}`,
+        }));
+        
+        const skippedAccounts: LaunchAccountResult[] = ps.blockedAccounts.map(blocked => ({
+          accountId: blocked.id,
+          accountName: blocked.name,
+          status: 'BLOCKED' as LaunchAccountStatus,
+          reason: blocked.reason,
+        }));
+
+        return {
+          platform: ps.platform,
+          accounts: [...launchedAccounts, ...skippedAccounts],
+          totalLaunched: launchedAccounts.length,
+          totalSkipped: skippedAccounts.length,
+        };
+      });
+
+      const totalLaunched = platformResults.reduce((sum, pr) => sum + pr.totalLaunched, 0);
+      const totalSkipped = platformResults.reduce((sum, pr) => sum + pr.totalSkipped, 0);
+
+      return {
+        runId: `run-${Date.now()}`,
+        status: totalSkipped > 0 && totalLaunched > 0 ? 'partial' : totalLaunched > 0 ? 'success' : 'failed',
+        platformResults,
+        totalCampaignsLaunched: totalLaunched,
+        totalCampaignsSkipped: totalSkipped,
+        memoryEventIds: platformResults.flatMap(pr => 
+          pr.accounts.filter(a => a.status !== 'BLOCKED' && a.status !== 'SKIPPED').map(() => `evt-${Date.now()}`)
+        ),
+      };
+    }
+
+    const response = await fetch(`${BRAIN_API_BASE_URL}/v1/launch/run`, {
+      method: 'POST',
+      headers: buildHeaders(projectId),
+      body: JSON.stringify(request),
+    });
+
+    return handleResponse<LaunchRunResponse>(response);
   },
 
   /**
