@@ -4,7 +4,7 @@ import {
     AdAccountConnection,
     PLATFORM_OBJECTIVE_NAMES,
     Campaign
-} from '../../types';
+} from '../../../types';
 import { TranslatedCampaign } from '../types';
 
 /**

@@ -1,4 +1,4 @@
-import { Platform } from '../../types';
+import { Platform } from '../../../types';
 import { MemoryEvent, MemoryEventType } from '../types';
 
 /**
