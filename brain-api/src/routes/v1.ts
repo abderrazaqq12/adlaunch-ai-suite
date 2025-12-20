@@ -159,5 +159,46 @@ app.get('/automation/logs', async (c) => {
     })
 })
 
-export default app
+// --- Automation Profiles (Phase 2) ---
+import { AutomationProfileManager } from '../lib/adlaunch-ai/automation/profile'
 
+const profileManager = new AutomationProfileManager(memory)
+
+// GET /automation/profile - Get automation profile
+app.get('/automation/profile', async (c) => {
+    const projectId = c.req.header('X-Project-Id')!
+    const accountId = c.req.query('accountId')
+    const campaignId = c.req.query('campaignId')
+
+    if (!accountId) {
+        return c.json({ error: 'accountId required' }, 400)
+    }
+
+    const profile = await profileManager.getProfile(projectId, accountId, campaignId)
+    return c.json({ profile })
+})
+
+// POST /automation/profile/update - Update automation profile
+const profileUpdateSchema = z.object({
+    accountId: z.string(),
+    campaignId: z.string().optional(),
+    allowBudgetIncrease: z.boolean(),
+    maxBudgetIncreasePct: z.number().min(0).max(50),
+    allowCreativeSwap: z.boolean(),
+    allowPlatformShift: z.boolean(),
+    riskLevel: z.enum(['LOW', 'MEDIUM'])
+})
+
+app.post('/automation/profile/update', zValidator('json', profileUpdateSchema), async (c) => {
+    const projectId = c.req.header('X-Project-Id')!
+    const body = c.req.valid('json')
+
+    await profileManager.updateProfile(projectId, {
+        ...body,
+        lastUpdated: Date.now()
+    })
+
+    return c.json({ success: true })
+})
+
+export default app

@@ -6,6 +6,10 @@ export type RuleActionType =
     | 'ROTATE_BACKUP_CREATIVE'
     | 'STOP_PLATFORM'
     | 'REDUCE_BUDGET'
+    // Phase 2 Actions
+    | 'INCREASE_BUDGET'
+    | 'SWAP_CREATIVE'
+    | 'SUGGEST_PLATFORM_SHIFT'
 
 export type SkipReason =
     | 'INSUFFICIENT_DATA'
@@ -62,4 +66,23 @@ export interface CooldownEntry {
     ruleId: string
     targetKey: string // platform:accountId:campaignId
     lastExecuted: number
+}
+
+// Phase 2: User Automation Profile
+export type RiskLevel = 'LOW' | 'MEDIUM'
+
+export interface AutomationProfile {
+    accountId: string
+    campaignId?: string // Optional: campaign-specific overrides
+    allowBudgetIncrease: boolean
+    maxBudgetIncreasePct: number
+    allowCreativeSwap: boolean
+    allowPlatformShift: boolean
+    riskLevel: RiskLevel
+    lastUpdated: number
+}
+
+export interface OptimizationLog extends AutomationLog {
+    allowedByUser: boolean
+    executed: boolean
 }
