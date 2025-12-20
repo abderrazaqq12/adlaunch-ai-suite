@@ -276,99 +276,85 @@ function LaunchContent() {
 
       addCampaignIntent(intent);
 
-      // Create real campaigns only for READY accounts based on executionReadiness
-      let launchedCount = 0;
-      const skippedDetails: string[] = [];
+      // SINGLE API CALL: Let the Brain service handle all orchestration
+      const launchResponse = await brainClient.launchRun(currentProject.id, {
+        intent,
+        executionReadiness: {
+          status: executionReadiness.status,
+          canLaunch: executionReadiness.canLaunch,
+          platformStatuses: executionReadiness.platformStatuses.map(ps => ({
+            platform: ps.platform,
+            readyAccounts: ps.readyAccounts,
+            blockedAccounts: ps.blockedAccounts,
+          })),
+        },
+        platformConfigs,
+      });
 
-      for (const platformStatus of executionReadiness.platformStatuses) {
-        const { platform, readyAccounts, blockedAccounts } = platformStatus;
-        
-        // Track blocked accounts for user feedback
-        for (const blocked of blockedAccounts) {
-          skippedDetails.push(`${blocked.name} (${blocked.reason})`);
-        }
-
-        // Only create campaigns for ready accounts
-        for (const accountId of readyAccounts) {
-          const account = currentProject.connections.find(c => c.id === accountId);
-          if (!account) continue;
-
-          // Call Brain API to decide launch
-          const decideResponse = await brainClient.decideLaunch(currentProject.id, {
-            executionStatus: executionReadiness.status,
-            policyRiskScore: 20, // Would come from analysis in production
-            platform,
-            permissions: account.permissions,
-          });
-
-          if (decideResponse.decision === 'block') {
-            skippedDetails.push(`${account.accountName} (${decideResponse.reason})`);
-            continue;
-          }
-
-          // Call Brain API to translate campaign
-          const translateResponse = await brainClient.translateCampaign(currentProject.id, {
-            intent,
-            platform,
-            accountId,
-            platformConfig: platformConfigs[platform],
-          });
-
-          const campaign: Campaign = {
-            id: translateResponse.translatedCampaign.id,
-            projectId: currentProject.id,
-            intentId,
-            name: `${campaignName} - ${account.accountName}`,
-            platform,
-            accountId,
-            status: 'pending',
-            budget: parseFloat(dailyBudget),
-            objective,
-            softLaunch,
-            metrics: {
-              spend: 0,
-              impressions: 0,
-              clicks: 0,
-              conversions: 0,
-              cpc: 0,
-              cpa: 0,
-              ctr: 0,
-              roas: 0,
-            },
-            approvalStatus: 'pending',
-            createdAt: new Date().toISOString(),
-          };
-
-          addCampaign(campaign);
-
-          // Write memory event
-          await brainClient.memoryWrite(currentProject.id, {
-            platform,
-            accountId,
-            event: 'launch',
-            details: {
-              campaignId: campaign.id,
+      // Process launch results - create local campaign records based on Brain response
+      for (const platformResult of launchResponse.platformResults) {
+        for (const accountResult of platformResult.accounts) {
+          // Only create campaigns for successfully launched accounts
+          if (accountResult.status === 'DECIDED_FULL' || accountResult.status === 'DECIDED_SOFT') {
+            const campaign: Campaign = {
+              id: accountResult.campaignId || `campaign-${Date.now()}-${platformResult.platform}-${accountResult.accountId}`,
+              projectId: currentProject.id,
               intentId,
+              name: `${campaignName} - ${accountResult.accountName}`,
+              platform: platformResult.platform,
+              accountId: accountResult.accountId,
+              status: accountResult.status === 'DECIDED_SOFT' ? 'pending' : 'active',
+              budget: parseFloat(dailyBudget),
               objective,
-            },
-          }).catch(err => console.warn('[Launch] Memory write failed:', err));
+              softLaunch: accountResult.status === 'DECIDED_SOFT',
+              metrics: {
+                spend: 0,
+                impressions: 0,
+                clicks: 0,
+                conversions: 0,
+                cpc: 0,
+                cpa: 0,
+                ctr: 0,
+                roas: 0,
+              },
+              approvalStatus: 'pending',
+              createdAt: new Date().toISOString(),
+            };
 
-          launchedCount++;
+            addCampaign(campaign);
+          }
         }
       }
 
-      // Show skipped accounts warning
-      if (skippedDetails.length > 0) {
+      // Show results based on launch response status
+      if (launchResponse.status === 'partial') {
+        const skippedDetails = launchResponse.platformResults
+          .flatMap(pr => pr.accounts.filter(a => a.status === 'BLOCKED' || a.status === 'SKIPPED'))
+          .map(a => `${a.accountName} (${a.reason || 'Blocked'})`);
+        
         toast({
-          title: 'Some Accounts Skipped',
-          description: `${skippedDetails.length} account(s) skipped: ${skippedDetails.slice(0, 3).join(', ')}${skippedDetails.length > 3 ? '...' : ''}`,
+          title: 'Partial Launch',
+          description: `${launchResponse.totalCampaignsLaunched} launched, ${launchResponse.totalCampaignsSkipped} skipped: ${skippedDetails.slice(0, 3).join(', ')}${skippedDetails.length > 3 ? '...' : ''}`,
           variant: 'default',
         });
+      } else if (launchResponse.status === 'failed') {
+        toast({
+          title: 'Launch Failed',
+          description: 'No campaigns could be launched. Check account permissions and try again.',
+          variant: 'destructive',
+        });
+        setIsLaunching(false);
+        return;
+      }
+
+      // Show warnings if any
+      if (launchResponse.warnings && launchResponse.warnings.length > 0) {
+        console.warn('[Launch] Warnings:', launchResponse.warnings);
       }
 
       toast({
         title: 'Campaigns Launched!',
-        description: `${launchedCount} campaign(s) submitted for review.`,
+        description: `${launchResponse.totalCampaignsLaunched} campaign(s) submitted for review.`,
       });
 
       navigate('/monitoring');
