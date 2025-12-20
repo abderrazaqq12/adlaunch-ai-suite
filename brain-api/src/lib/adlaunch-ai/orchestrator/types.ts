@@ -6,6 +6,7 @@ export type LaunchStatus =
     | 'DECIDED_FULL'
     | 'SKIPPED_NO_PERMISSION'
     | 'FAILED_VALIDATION'
+    | 'BLOCKED_COMPLIANCE'
 
 export type ExecutionStatus = 'BLOCKED' | 'PARTIAL_READY' | 'READY'
 

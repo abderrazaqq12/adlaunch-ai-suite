@@ -82,6 +82,30 @@ async function runTests() {
     })
     console.log('Status:', res5b.status)
     console.log('Body (should be same):', JSON.stringify(await res5b.json(), null, 2))
+
+    // 6. Test Compliance Block
+    console.log('\n6. Testing Compliance Block')
+    const compliancePayload = {
+        idempotency_key: 'launch_violation_1',
+        campaign_intent: {
+            name: 'Illegal Crypto Ad',
+            description: 'Guaranteed 100% returns on crypto',
+            budget: 1000
+        },
+        execution_status: 'READY',
+        policy_risk_score: 10,
+        targets: [
+            { platform: 'google', accounts: ['acc_1'] }
+        ]
+    }
+
+    const res6 = await app.request('/api/brain/v1/launch/run', {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(compliancePayload)
+    })
+    console.log('Status:', res6.status)
+    console.log('Body (should be BLOCKED_COMPLIANCE):', JSON.stringify(await res6.json(), null, 2))
 }
 
 runTests().catch(console.error)

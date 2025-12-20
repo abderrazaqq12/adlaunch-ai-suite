@@ -105,8 +105,10 @@ app.post('/memory/write', zValidator('json', memoryWriteSchema), async (c) => {
 
 // --- Orchestrator ---
 import { LaunchOrchestrator } from '../lib/adlaunch-ai/orchestrator/index'
+import { ComplianceGuard } from '../lib/adlaunch-ai/compliance/index'
 
-const orchestrator = new LaunchOrchestrator(permissions, translator, decider, memory)
+const compliance = new ComplianceGuard(memory)
+const orchestrator = new LaunchOrchestrator(permissions, translator, decider, memory, compliance)
 
 const launchRunSchema = z.object({
     idempotency_key: z.string(),

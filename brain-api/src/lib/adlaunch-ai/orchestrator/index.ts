@@ -2,6 +2,7 @@ import { PermissionsEngine } from '../engines/permissions'
 import { TranslatorEngine } from '../engines/translator'
 import { DeciderEngine } from '../engines/decider'
 import { MemoryEngine } from '../memory/index'
+import { ComplianceGuard } from '../compliance/index'
 import { LaunchRequest, LaunchRun, LaunchRunItem, LaunchStatus } from './types'
 import { BrainError } from '../../errors'
 
@@ -10,7 +11,8 @@ export class LaunchOrchestrator {
         private permissions: PermissionsEngine,
         private translator: TranslatorEngine,
         private decider: DeciderEngine,
-        private memory: MemoryEngine
+        private memory: MemoryEngine,
+        private compliance: ComplianceGuard
     ) { }
 
     async runLaunch(projectId: string, request: LaunchRequest): Promise<LaunchRun> {
@@ -41,7 +43,7 @@ export class LaunchOrchestrator {
                 try {
                     // A. Permission Check
                     // Mock context: assume server has a "system" role or acts on behalf of a user provided in context?
-                    // For this request we don't have user context, so we'll skip strict user role checks 
+                    // For this request we don't have user context, so we'll skip strict user role checks
                     // OR assume we check project/account access.
                     // Let's use the provided PermissionsEngine with a dummy 'server' role for now to satisify the flow
                     const perm = this.permissions.interpret({ role: 'admin', action: 'launch', resource: `account:${accountId}` })
@@ -53,12 +55,21 @@ export class LaunchOrchestrator {
                     }
 
                     // B. Execution Status Partial Check
-                    // If PARTIAL_READY, maybe we have specific logic? 
-                    // Requirement: "PARTIAL_READY -> only launch allowed accounts". 
+                    // If PARTIAL_READY, maybe we have specific logic?
+                    // Requirement: "PARTIAL_READY -> only launch allowed accounts".
                     // For now assume all accounts in request are "allowed" unless specific logic provided.
                     // We will proceed.
 
-                    // C. Translation
+                    // C. Compliance Check (NEW)
+                    const complianceResult = await this.compliance.validate(request.campaign_intent, target.platform, projectId)
+                    if (!complianceResult.passed) {
+                        itemStatus = 'BLOCKED_COMPLIANCE'
+                        blocked++
+                        runItems.push({ platform: target.platform, accountId, status: itemStatus, error: 'Compliance violations found: ' + complianceResult.issues.join(', ') })
+                        continue
+                    }
+
+                    // D. Translation
                     // We might wrap this in try/catch for validation errors
                     const translation = this.translator.translate(request.campaign_intent, target.platform)
                     if (!translation) {
