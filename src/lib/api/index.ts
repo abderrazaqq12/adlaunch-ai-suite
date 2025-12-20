@@ -12,6 +12,7 @@ export type {
   LaunchPlatformResult,
   LaunchAccountResult,
   LaunchAccountStatus,
+  RealExecutionStatus,
   OptimizeRequest,
   OptimizeResponse,
   RecoverRequest,

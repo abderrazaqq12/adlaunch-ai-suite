@@ -13,6 +13,7 @@ import { ProjectGate } from '@/components/common/ProjectGate';
 import { PlatformBadge } from '@/components/common/PlatformBadge';
 import { ExecutionReadinessPanel } from '@/components/common/ExecutionReadinessPanel';
 import { ExecutionStatusBadge } from '@/components/common/ExecutionStatusBadge';
+import { LaunchConfirmationDialog } from '@/components/launch/LaunchConfirmationDialog';
 import { useExecutionReadiness } from '@/hooks/useExecutionReadiness';
 import { brainClient, BrainClientError } from '@/lib/api';
 import type { 
@@ -104,12 +105,16 @@ function StepIndicator({ currentStep, steps }: { currentStep: WizardStep; steps:
 
 function LaunchContent() {
   const navigate = useNavigate();
-  const { currentProject, assets, addCampaignIntent, addCampaign } = useProjectStore();
+  const { currentProject, assets, campaignIntents, addCampaignIntent, addCampaign, updateCampaignIntent } = useProjectStore();
   const { toast } = useToast();
 
   // Wizard state
   const [currentStep, setCurrentStep] = useState<WizardStep>('intent');
   const [isLaunching, setIsLaunching] = useState(false);
+  const [showConfirmDialog, setShowConfirmDialog] = useState(false);
+  
+  // Track launched runs to prevent duplicates
+  const [launchedRunIds, setLaunchedRunIds] = useState<Set<string>>(new Set());
 
   // Campaign Intent state
   const [campaignName, setCampaignName] = useState('');
@@ -247,7 +252,37 @@ function LaunchContent() {
     }
   };
 
+  // Check if this intent would be a duplicate launch
+  const getIntentKey = () => {
+    return `${campaignName}-${selectedPlatforms.sort().join(',')}-${accountSelections.map(s => `${s.platform}:${s.accountIds.sort().join(',')}`).join('|')}`;
+  };
+  
+  const isDuplicateLaunch = () => {
+    // Check if there's already a launched intent with the same config
+    return campaignIntents.some(intent => 
+      intent.projectId === currentProject?.id &&
+      intent.status === 'launched' &&
+      intent.name === campaignName &&
+      JSON.stringify(intent.selectedPlatforms.sort()) === JSON.stringify(selectedPlatforms.sort()) &&
+      JSON.stringify(intent.accountSelections) === JSON.stringify(accountSelections)
+    );
+  };
+
+  const handleLaunchClick = () => {
+    if (isDuplicateLaunch()) {
+      toast({
+        title: 'Duplicate Launch Prevented',
+        description: 'This campaign configuration has already been launched. Create a new campaign with different settings.',
+        variant: 'destructive',
+      });
+      return;
+    }
+    setShowConfirmDialog(true);
+  };
+
   const handleLaunch = async () => {
+    setShowConfirmDialog(false);
+    
     if (!executionReadiness.canLaunch || !currentProject) return;
 
     setIsLaunching(true);
@@ -291,11 +326,18 @@ function LaunchContent() {
         platformConfigs,
       });
 
+      // Track this launch run to prevent duplicates
+      setLaunchedRunIds(prev => new Set([...prev, launchResponse.runId]));
+
       // Process launch results - create local campaign records based on Brain response
       for (const platformResult of launchResponse.platformResults) {
         for (const accountResult of platformResult.accounts) {
-          // Only create campaigns for successfully launched accounts
-          if (accountResult.status === 'DECIDED_FULL' || accountResult.status === 'DECIDED_SOFT') {
+          // Create campaigns for all accounts to show execution status
+          const isLaunched = accountResult.status === 'DECIDED_FULL' || accountResult.status === 'DECIDED_SOFT';
+          const isFailed = accountResult.executionStatus === 'EXECUTION_FAILED';
+          const isBlocked = accountResult.status === 'BLOCKED' || accountResult.executionStatus === 'EXECUTION_BLOCKED';
+          
+          if (isLaunched || isFailed) {
             const campaign: Campaign = {
               id: accountResult.campaignId || `campaign-${Date.now()}-${platformResult.platform}-${accountResult.accountId}`,
               projectId: currentProject.id,
@@ -303,7 +345,7 @@ function LaunchContent() {
               name: `${campaignName} - ${accountResult.accountName}`,
               platform: platformResult.platform,
               accountId: accountResult.accountId,
-              status: accountResult.status === 'DECIDED_SOFT' ? 'pending' : 'active',
+              status: isFailed ? 'disapproved' : (accountResult.status === 'DECIDED_SOFT' ? 'pending' : 'active'),
               budget: parseFloat(dailyBudget),
               objective,
               softLaunch: accountResult.status === 'DECIDED_SOFT',
@@ -317,7 +359,8 @@ function LaunchContent() {
                 ctr: 0,
                 roas: 0,
               },
-              approvalStatus: 'pending',
+              approvalStatus: isFailed ? 'disapproved' : 'pending',
+              disapprovalReason: accountResult.platformError,
               createdAt: new Date().toISOString(),
             };
 
@@ -325,6 +368,12 @@ function LaunchContent() {
           }
         }
       }
+
+      // Update intent status to launched
+      updateCampaignIntent(intentId, { 
+        status: launchResponse.status === 'failed' ? 'failed' : 'launched',
+        launchedAt: new Date().toISOString(),
+      });
 
       // Show results based on launch response status
       if (launchResponse.status === 'partial') {
@@ -987,10 +1036,15 @@ function LaunchContent() {
           <Button 
             variant="glow" 
             size="lg"
-            onClick={handleLaunch}
-            disabled={isLaunching || !executionReadiness.canLaunch || executionReadiness.totalCampaignsReady === 0}
+            onClick={handleLaunchClick}
+            disabled={isLaunching || !executionReadiness.canLaunch || executionReadiness.totalCampaignsReady === 0 || isDuplicateLaunch()}
           >
-            {isLaunching ? (
+            {isDuplicateLaunch() ? (
+              <>
+                <AlertTriangle className="mr-2 h-5 w-5" />
+                Already Launched
+              </>
+            ) : isLaunching ? (
               <>
                 <Zap className="mr-2 h-5 w-5 animate-pulse" />
                 Launching {executionReadiness.totalCampaignsReady} Campaign{executionReadiness.totalCampaignsReady !== 1 ? 's' : ''}...
@@ -1017,6 +1071,16 @@ function LaunchContent() {
           </Button>
         )}
       </div>
+
+      {/* Launch Confirmation Dialog */}
+      <LaunchConfirmationDialog
+        open={showConfirmDialog}
+        onOpenChange={setShowConfirmDialog}
+        onConfirm={handleLaunch}
+        campaignCount={executionReadiness.totalCampaignsReady}
+        platforms={selectedPlatforms}
+        isLaunching={isLaunching}
+      />
     </div>
   );
 }

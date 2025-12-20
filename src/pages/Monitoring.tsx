@@ -8,7 +8,8 @@ import { PlatformBadge } from '@/components/common/PlatformBadge';
 import { StatusBadge } from '@/components/common/StatusBadge';
 import { StatCard } from '@/components/common/StatCard';
 import { ExecutionStatusBadge } from '@/components/common/ExecutionStatusBadge';
-import { brainClient, BrainClientError, type OptimizeResponse } from '@/lib/api';
+import { RealExecutionStatusBadge } from '@/components/common/RealExecutionStatusBadge';
+import { brainClient, BrainClientError, type OptimizeResponse, type RealExecutionStatus } from '@/lib/api';
 import { useToast } from '@/hooks/use-toast';
 import type { Platform, Campaign, AIAction, CampaignIntent } from '@/types';
 import { PLATFORM_OBJECTIVE_NAMES } from '@/types';
@@ -27,10 +28,17 @@ import {
   Calendar,
   ChevronRight,
   Loader2,
+  AlertCircle,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
-function CampaignCard({ campaign, onPauseResume }: { campaign: Campaign; onPauseResume: () => void }) {
+// Extended campaign type with execution info (simulated from launch response)
+interface CampaignWithExecution extends Campaign {
+  executionStatus?: RealExecutionStatus;
+  platformError?: string;
+}
+
+function CampaignCard({ campaign, onPauseResume }: { campaign: CampaignWithExecution; onPauseResume: () => void }) {
   const [isPausing, setIsPausing] = useState(false);
   const { currentProject } = useProjectStore();
   const { toast } = useToast();
@@ -71,6 +79,16 @@ function CampaignCard({ campaign, onPauseResume }: { campaign: Campaign; onPause
     }
   };
 
+  // Derive execution status from campaign status for display
+  const getExecutionStatus = (): RealExecutionStatus | null => {
+    if (campaign.executionStatus) return campaign.executionStatus;
+    if (campaign.status === 'active' || campaign.status === 'paused') return 'EXECUTED';
+    if (campaign.status === 'disapproved') return 'EXECUTION_BLOCKED';
+    return null;
+  };
+
+  const executionStatus = getExecutionStatus();
+
   return (
     <Card className="border-border bg-card">
       <CardHeader className="flex flex-row items-start justify-between space-y-0 pb-4">
@@ -78,6 +96,9 @@ function CampaignCard({ campaign, onPauseResume }: { campaign: Campaign; onPause
           <div className="flex items-center gap-3">
             <PlatformBadge platform={campaign.platform} size="sm" />
             <StatusBadge status={campaign.approvalStatus} />
+            {executionStatus && (
+              <RealExecutionStatusBadge status={executionStatus} />
+            )}
           </div>
           <CardTitle className="text-lg">{campaign.name}</CardTitle>
         </div>
@@ -85,7 +106,7 @@ function CampaignCard({ campaign, onPauseResume }: { campaign: Campaign; onPause
           variant="outline"
           size="sm"
           onClick={handlePauseResume}
-          disabled={isPausing}
+          disabled={isPausing || executionStatus === 'EXECUTION_FAILED'}
         >
           {campaign.status === 'paused' ? (
             <>
@@ -127,6 +148,36 @@ function CampaignCard({ campaign, onPauseResume }: { campaign: Campaign; onPause
             </p>
           </div>
         </div>
+
+        {/* Execution Failed Error */}
+        {(executionStatus === 'EXECUTION_FAILED' || campaign.platformError) && (
+          <div className="mt-4 rounded-lg border border-destructive/20 bg-destructive/5 p-3">
+            <div className="flex items-start gap-2">
+              <AlertCircle className="h-4 w-4 text-destructive mt-0.5 shrink-0" />
+              <div>
+                <p className="text-sm font-medium text-destructive">Execution Failed</p>
+                <p className="text-sm text-destructive/80">
+                  {campaign.platformError || 'Failed to create campaign in ad platform. Check account permissions and try again.'}
+                </p>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Execution Blocked Error */}
+        {executionStatus === 'EXECUTION_BLOCKED' && !campaign.platformError && (
+          <div className="mt-4 rounded-lg border border-warning/20 bg-warning/5 p-3">
+            <div className="flex items-start gap-2">
+              <AlertCircle className="h-4 w-4 text-warning mt-0.5 shrink-0" />
+              <div>
+                <p className="text-sm font-medium text-warning">Blocked by Platform</p>
+                <p className="text-sm text-warning/80">
+                  This campaign was blocked by the ad platform's policies.
+                </p>
+              </div>
+            </div>
+          </div>
+        )}
 
         {campaign.approvalStatus === 'disapproved' && campaign.disapprovalReason && (
           <div className="mt-4 rounded-lg border border-destructive/20 bg-destructive/5 p-3">
