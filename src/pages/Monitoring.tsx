@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
@@ -8,6 +8,8 @@ import { PlatformBadge } from '@/components/common/PlatformBadge';
 import { StatusBadge } from '@/components/common/StatusBadge';
 import { StatCard } from '@/components/common/StatCard';
 import { ExecutionStatusBadge } from '@/components/common/ExecutionStatusBadge';
+import { brainClient, BrainClientError, type OptimizeResponse } from '@/lib/api';
+import { useToast } from '@/hooks/use-toast';
 import type { Platform, Campaign, AIAction, CampaignIntent } from '@/types';
 import { PLATFORM_OBJECTIVE_NAMES } from '@/types';
 import { 
@@ -24,45 +26,49 @@ import {
   Layers,
   Calendar,
   ChevronRight,
+  Loader2,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
-// Mock AI actions for demonstration
-const mockAIActions: AIAction[] = [
-  {
-    id: '1',
-    campaignId: 'campaign-1',
-    timestamp: new Date(Date.now() - 3600000).toISOString(),
-    action: 'Increased bid by 15%',
-    reason: 'CPC below target threshold with high conversion rate',
-    result: 'CPC increased from $0.45 to $0.52',
-  },
-  {
-    id: '2',
-    campaignId: 'campaign-1',
-    timestamp: new Date(Date.now() - 7200000).toISOString(),
-    action: 'Paused underperforming ad variation',
-    reason: 'CTR 0.3% below campaign average after 5,000 impressions',
-    result: 'Budget reallocated to top performers',
-  },
-  {
-    id: '3',
-    campaignId: 'campaign-2',
-    timestamp: new Date(Date.now() - 10800000).toISOString(),
-    action: 'Expanded audience targeting',
-    reason: 'Campaign approaching daily budget limit with strong ROAS',
-    result: 'Added lookalike audience segment',
-  },
-];
-
-function CampaignCard({ campaign }: { campaign: Campaign }) {
+function CampaignCard({ campaign, onPauseResume }: { campaign: Campaign; onPauseResume: () => void }) {
   const [isPausing, setIsPausing] = useState(false);
+  const { currentProject } = useProjectStore();
+  const { toast } = useToast();
 
   const handlePauseResume = async () => {
+    if (!currentProject) return;
+    
     setIsPausing(true);
-    // TODO: Replace with actual API call
-    await new Promise(resolve => setTimeout(resolve, 1000));
-    setIsPausing(false);
+    
+    try {
+      const newStatus = campaign.status === 'paused' ? 'resume' : 'pause';
+      
+      await brainClient.memoryWrite(currentProject.id, {
+        platform: campaign.platform,
+        accountId: campaign.accountId,
+        event: newStatus as 'pause' | 'resume',
+        details: {
+          campaignId: campaign.id,
+          previousStatus: campaign.status,
+        },
+      });
+
+      onPauseResume();
+      
+      toast({
+        title: campaign.status === 'paused' ? 'Campaign Resumed' : 'Campaign Paused',
+        description: `${campaign.name} has been ${campaign.status === 'paused' ? 'resumed' : 'paused'}.`,
+      });
+    } catch (err) {
+      const message = err instanceof BrainClientError ? err.message : 'Failed to update campaign';
+      toast({
+        title: 'Action Failed',
+        description: message,
+        variant: 'destructive',
+      });
+    } finally {
+      setIsPausing(false);
+    }
   };
 
   return (
@@ -134,7 +140,25 @@ function CampaignCard({ campaign }: { campaign: Campaign }) {
   );
 }
 
-function AIActionLog({ actions }: { actions: AIAction[] }) {
+function AIActionLog({ actions, isLoading }: { actions: AIAction[]; isLoading: boolean }) {
+  if (isLoading) {
+    return (
+      <div className="flex items-center justify-center py-8">
+        <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+        <span className="ml-2 text-sm text-muted-foreground">Loading AI actions...</span>
+      </div>
+    );
+  }
+
+  if (actions.length === 0) {
+    return (
+      <div className="text-center py-8 text-muted-foreground">
+        <Bot className="h-10 w-10 mx-auto mb-3 opacity-50" />
+        <p>No AI actions yet</p>
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-4">
       {actions.map(action => (
@@ -257,10 +281,15 @@ function CampaignIntentHistory({ intents, campaigns }: { intents: CampaignIntent
 
 function MonitoringContent() {
   const [activeTab, setActiveTab] = useState<'all' | Platform>('all');
-  const { campaigns, campaignIntents, currentProject } = useProjectStore();
+  const [aiActions, setAiActions] = useState<AIAction[]>([]);
+  const [isLoadingActions, setIsLoadingActions] = useState(false);
+  const [isRefreshing, setIsRefreshing] = useState(false);
+  const { campaigns, campaignIntents, currentProject, rules } = useProjectStore();
+  const { toast } = useToast();
 
   const projectCampaigns = campaigns.filter(c => c.projectId === currentProject?.id);
   const projectIntents = campaignIntents.filter(i => i.projectId === currentProject?.id);
+  const projectRules = rules.filter(r => r.projectId === currentProject?.id && r.enabled);
 
   const filteredCampaigns = activeTab === 'all'
     ? projectCampaigns
@@ -274,6 +303,70 @@ function MonitoringContent() {
     ? projectCampaigns.reduce((sum, c) => sum + c.metrics.roas, 0) / projectCampaigns.length
     : 0;
 
+  // Fetch AI optimization actions
+  const fetchOptimizations = useCallback(async () => {
+    if (!currentProject || projectCampaigns.length === 0) return;
+
+    setIsLoadingActions(true);
+
+    try {
+      const allActions: AIAction[] = [];
+      const platforms = [...new Set(projectCampaigns.map(c => c.platform))];
+
+      for (const platform of platforms) {
+        const platformCampaigns = projectCampaigns.filter(c => c.platform === platform);
+        const aggregatedMetrics = {
+          spend: platformCampaigns.reduce((sum, c) => sum + c.metrics.spend, 0),
+          impressions: platformCampaigns.reduce((sum, c) => sum + c.metrics.impressions, 0),
+          clicks: platformCampaigns.reduce((sum, c) => sum + c.metrics.clicks, 0),
+          conversions: platformCampaigns.reduce((sum, c) => sum + c.metrics.conversions, 0),
+          cpc: platformCampaigns.reduce((sum, c) => sum + c.metrics.cpc, 0) / platformCampaigns.length,
+          cpa: platformCampaigns.reduce((sum, c) => sum + c.metrics.cpa, 0) / platformCampaigns.length,
+          ctr: platformCampaigns.reduce((sum, c) => sum + c.metrics.ctr, 0) / platformCampaigns.length,
+          roas: platformCampaigns.reduce((sum, c) => sum + c.metrics.roas, 0) / platformCampaigns.length,
+        };
+
+        const response = await brainClient.optimize(currentProject.id, {
+          platform,
+          metrics: aggregatedMetrics,
+          rules: projectRules,
+        });
+
+        allActions.push(...response.actions.map(a => ({
+          ...a,
+          campaignId: platformCampaigns[0]?.id || '',
+        })));
+      }
+
+      setAiActions(allActions);
+    } catch (err) {
+      console.error('[Monitoring] Failed to fetch optimizations:', err);
+      // Don't show error toast for optimization failures - it's not critical
+    } finally {
+      setIsLoadingActions(false);
+    }
+  }, [currentProject, projectCampaigns, projectRules]);
+
+  // Initial load
+  useEffect(() => {
+    fetchOptimizations();
+  }, [fetchOptimizations]);
+
+  const handleRefresh = async () => {
+    setIsRefreshing(true);
+    await fetchOptimizations();
+    setIsRefreshing(false);
+    toast({
+      title: 'Data Refreshed',
+      description: 'Campaign data and AI actions have been updated.',
+    });
+  };
+
+  const handlePauseResume = () => {
+    // Trigger refresh after pause/resume
+    fetchOptimizations();
+  };
+
   return (
     <div className="space-y-8">
       {/* Header */}
@@ -284,8 +377,8 @@ function MonitoringContent() {
             Real-time campaign performance and AI decisions.
           </p>
         </div>
-        <Button variant="outline">
-          <RefreshCw className="mr-2 h-4 w-4" />
+        <Button variant="outline" onClick={handleRefresh} disabled={isRefreshing}>
+          <RefreshCw className={cn("mr-2 h-4 w-4", isRefreshing && "animate-spin")} />
           Refresh Data
         </Button>
       </div>
@@ -330,7 +423,11 @@ function MonitoringContent() {
           {filteredCampaigns.length > 0 ? (
             <div className="space-y-4">
               {filteredCampaigns.map(campaign => (
-                <CampaignCard key={campaign.id} campaign={campaign} />
+                <CampaignCard 
+                  key={campaign.id} 
+                  campaign={campaign} 
+                  onPauseResume={handlePauseResume}
+                />
               ))}
             </div>
           ) : (
@@ -376,7 +473,7 @@ function MonitoringContent() {
               </CardDescription>
             </CardHeader>
             <CardContent>
-              <AIActionLog actions={mockAIActions} />
+              <AIActionLog actions={aiActions} isLoading={isLoadingActions} />
             </CardContent>
           </Card>
         </div>

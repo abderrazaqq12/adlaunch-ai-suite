@@ -14,6 +14,7 @@ import { PlatformBadge } from '@/components/common/PlatformBadge';
 import { ExecutionReadinessPanel } from '@/components/common/ExecutionReadinessPanel';
 import { ExecutionStatusBadge } from '@/components/common/ExecutionStatusBadge';
 import { useExecutionReadiness } from '@/hooks/useExecutionReadiness';
+import { brainClient, BrainClientError } from '@/lib/api';
 import type { 
   Platform, 
   Campaign, 
@@ -252,9 +253,6 @@ function LaunchContent() {
     setIsLaunching(true);
 
     try {
-      // TODO: Replace with actual API call
-      await new Promise(resolve => setTimeout(resolve, 2000));
-
       const intentId = `intent-${Date.now()}`;
       
       // Create Campaign Intent with execution status
@@ -295,8 +293,29 @@ function LaunchContent() {
           const account = currentProject.connections.find(c => c.id === accountId);
           if (!account) continue;
 
+          // Call Brain API to decide launch
+          const decideResponse = await brainClient.decideLaunch(currentProject.id, {
+            executionStatus: executionReadiness.status,
+            policyRiskScore: 20, // Would come from analysis in production
+            platform,
+            permissions: account.permissions,
+          });
+
+          if (decideResponse.decision === 'block') {
+            skippedDetails.push(`${account.accountName} (${decideResponse.reason})`);
+            continue;
+          }
+
+          // Call Brain API to translate campaign
+          const translateResponse = await brainClient.translateCampaign(currentProject.id, {
+            intent,
+            platform,
+            accountId,
+            platformConfig: platformConfigs[platform],
+          });
+
           const campaign: Campaign = {
-            id: `campaign-${Date.now()}-${platform}-${accountId}`,
+            id: translateResponse.translatedCampaign.id,
             projectId: currentProject.id,
             intentId,
             name: `${campaignName} - ${account.accountName}`,
@@ -321,6 +340,19 @@ function LaunchContent() {
           };
 
           addCampaign(campaign);
+
+          // Write memory event
+          await brainClient.memoryWrite(currentProject.id, {
+            platform,
+            accountId,
+            event: 'launch',
+            details: {
+              campaignId: campaign.id,
+              intentId,
+              objective,
+            },
+          }).catch(err => console.warn('[Launch] Memory write failed:', err));
+
           launchedCount++;
         }
       }
@@ -341,9 +373,12 @@ function LaunchContent() {
 
       navigate('/monitoring');
     } catch (error) {
+      const message = error instanceof BrainClientError 
+        ? error.message 
+        : 'Failed to launch campaigns. Please try again.';
       toast({
         title: 'Launch Failed',
-        description: 'Failed to launch campaigns. Please try again.',
+        description: message,
         variant: 'destructive',
       });
     } finally {

@@ -1,9 +1,10 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { useProjectStore } from '@/stores/projectStore';
 import { useToast } from '@/hooks/use-toast';
+import { brainClient, BrainClientError, type RecoverResponse } from '@/lib/api';
 import { PlatformBadge } from '@/components/common/PlatformBadge';
 import type { Campaign } from '@/types';
 import { 
@@ -14,32 +15,63 @@ import {
   X,
   Lightbulb,
   Rocket,
+  Loader2,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
-// Mock AI-generated alternatives for demonstration
-const mockAlternatives = [
-  {
-    id: '1',
-    original: 'Get GUARANTEED results in 24 hours!',
-    suggestion: 'See real results in as little as 24 hours',
-    reason: 'Removed guarantee claim which violates policy',
-  },
-  {
-    id: '2',
-    original: 'FREE forever - no hidden costs',
-    suggestion: 'Start free today with transparent pricing',
-    reason: 'Clarified pricing claim to avoid misleading language',
-  },
-];
+interface RecoveryAlternative {
+  id: string;
+  original: string;
+  suggestion: string;
+  reason: string;
+  confidence: number;
+}
 
 function DisapprovedCampaignCard({ campaign }: { campaign: Campaign }) {
   const [isRelaunching, setIsRelaunching] = useState(false);
+  const [isLoadingAlternatives, setIsLoadingAlternatives] = useState(false);
+  const [alternatives, setAlternatives] = useState<RecoveryAlternative[]>([]);
   const [selectedAlternative, setSelectedAlternative] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
   const { toast } = useToast();
+  const { currentProject } = useProjectStore();
+
+  // Load AI alternatives on mount
+  useEffect(() => {
+    const loadAlternatives = async () => {
+      if (!currentProject) return;
+      
+      setIsLoadingAlternatives(true);
+      setError(null);
+
+      try {
+        const response = await brainClient.recover(currentProject.id, {
+          platform: campaign.platform,
+          disapprovalReason: campaign.disapprovalReason || 'Policy violation',
+          originalAd: {
+            id: campaign.id,
+            content: campaign.name, // In production, this would be actual ad content
+            type: 'text',
+          },
+        });
+
+        setAlternatives(response.alternatives);
+      } catch (err) {
+        const message = err instanceof BrainClientError 
+          ? err.message 
+          : 'Failed to generate alternatives';
+        setError(message);
+        console.error('[Recovery] Failed to load alternatives:', err);
+      } finally {
+        setIsLoadingAlternatives(false);
+      }
+    };
+
+    loadAlternatives();
+  }, [campaign, currentProject]);
 
   const handleRelaunch = async () => {
-    if (!selectedAlternative) {
+    if (!selectedAlternative || !currentProject) {
       toast({
         title: 'Select an Alternative',
         description: 'Please select a safe variant before relaunching.',
@@ -49,15 +81,37 @@ function DisapprovedCampaignCard({ campaign }: { campaign: Campaign }) {
     }
 
     setIsRelaunching(true);
-    // TODO: Replace with actual API call
-    await new Promise(resolve => setTimeout(resolve, 2000));
-    
-    toast({
-      title: 'Campaign Relaunched',
-      description: 'Your campaign has been resubmitted with the safe variant.',
-    });
-    
-    setIsRelaunching(false);
+
+    try {
+      // Write memory event for recovery action
+      await brainClient.memoryWrite(currentProject.id, {
+        platform: campaign.platform,
+        accountId: campaign.accountId,
+        event: 'recovery',
+        details: {
+          campaignId: campaign.id,
+          selectedAlternative,
+          originalReason: campaign.disapprovalReason,
+        },
+      });
+      
+      toast({
+        title: 'Campaign Relaunched',
+        description: 'Your campaign has been resubmitted with the safe variant.',
+      });
+    } catch (err) {
+      const message = err instanceof BrainClientError 
+        ? err.message 
+        : 'Failed to relaunch campaign';
+      
+      toast({
+        title: 'Relaunch Failed',
+        description: message,
+        variant: 'destructive',
+      });
+    } finally {
+      setIsRelaunching(false);
+    }
   };
 
   return (
@@ -94,58 +148,81 @@ function DisapprovedCampaignCard({ campaign }: { campaign: Campaign }) {
             <Sparkles className="h-5 w-5 text-primary" />
             <p className="font-medium text-foreground">AI-Generated Safe Variants</p>
           </div>
-          
-          <div className="space-y-3">
-            {mockAlternatives.map(alt => (
-              <div
-                key={alt.id}
-                onClick={() => setSelectedAlternative(alt.id)}
-                className={cn(
-                  'cursor-pointer rounded-lg border p-4 transition-all',
-                  selectedAlternative === alt.id
-                    ? 'border-primary bg-primary/5'
-                    : 'border-border hover:border-primary/50'
-                )}
-              >
-                <div className="flex items-start gap-3">
-                  <div className={cn(
-                    'flex h-6 w-6 shrink-0 items-center justify-center rounded-full border',
+
+          {/* Loading State */}
+          {isLoadingAlternatives && (
+            <div className="flex items-center justify-center py-8">
+              <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+              <span className="ml-2 text-sm text-muted-foreground">Generating alternatives...</span>
+            </div>
+          )}
+
+          {/* Error State */}
+          {error && !isLoadingAlternatives && (
+            <div className="rounded-lg border border-destructive/20 bg-destructive/5 p-4">
+              <p className="text-sm text-destructive">{error}</p>
+            </div>
+          )}
+
+          {/* Alternatives List */}
+          {!isLoadingAlternatives && alternatives.length > 0 && (
+            <div className="space-y-3">
+              {alternatives.map(alt => (
+                <div
+                  key={alt.id}
+                  onClick={() => setSelectedAlternative(alt.id)}
+                  className={cn(
+                    'cursor-pointer rounded-lg border p-4 transition-all',
                     selectedAlternative === alt.id
-                      ? 'border-primary bg-primary text-primary-foreground'
-                      : 'border-border'
-                  )}>
-                    {selectedAlternative === alt.id && <Check className="h-4 w-4" />}
-                  </div>
-                  <div className="flex-1 space-y-2">
-                    <div className="flex items-center gap-2">
-                      <X className="h-4 w-4 text-destructive" />
-                      <p className="text-sm text-muted-foreground line-through">
-                        {alt.original}
-                      </p>
+                      ? 'border-primary bg-primary/5'
+                      : 'border-border hover:border-primary/50'
+                  )}
+                >
+                  <div className="flex items-start gap-3">
+                    <div className={cn(
+                      'flex h-6 w-6 shrink-0 items-center justify-center rounded-full border',
+                      selectedAlternative === alt.id
+                        ? 'border-primary bg-primary text-primary-foreground'
+                        : 'border-border'
+                    )}>
+                      {selectedAlternative === alt.id && <Check className="h-4 w-4" />}
                     </div>
-                    <div className="flex items-center gap-2">
-                      <Check className="h-4 w-4 text-success" />
-                      <p className="text-sm text-foreground font-medium">
-                        {alt.suggestion}
-                      </p>
-                    </div>
-                    <div className="flex items-start gap-2 mt-2">
-                      <Lightbulb className="h-4 w-4 text-warning shrink-0" />
-                      <p className="text-xs text-muted-foreground">
-                        {alt.reason}
-                      </p>
+                    <div className="flex-1 space-y-2">
+                      <div className="flex items-center gap-2">
+                        <X className="h-4 w-4 text-destructive" />
+                        <p className="text-sm text-muted-foreground line-through">
+                          {alt.original}
+                        </p>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <Check className="h-4 w-4 text-success" />
+                        <p className="text-sm text-foreground font-medium">
+                          {alt.suggestion}
+                        </p>
+                      </div>
+                      <div className="flex items-start gap-2 mt-2">
+                        <Lightbulb className="h-4 w-4 text-warning shrink-0" />
+                        <p className="text-xs text-muted-foreground">
+                          {alt.reason}
+                        </p>
+                      </div>
+                      {alt.confidence && (
+                        <div className="text-xs text-muted-foreground">
+                          Confidence: {Math.round(alt.confidence * 100)}%
+                        </div>
+                      )}
                     </div>
                   </div>
                 </div>
-              </div>
-            ))}
-          </div>
+              ))}
+            </div>
+          )}
         </div>
 
         {/* Relaunch Button */}
         <Button
           onClick={handleRelaunch}
-          disabled={isRelaunching || !selectedAlternative}
+          disabled={isRelaunching || !selectedAlternative || isLoadingAlternatives}
           className="w-full"
           variant="success"
         >
@@ -167,8 +244,9 @@ function DisapprovedCampaignCard({ campaign }: { campaign: Campaign }) {
 }
 
 export default function Recovery() {
-  const { campaigns } = useProjectStore();
-  const disapprovedCampaigns = campaigns.filter(c => c.approvalStatus === 'disapproved');
+  const { campaigns, currentProject } = useProjectStore();
+  const projectCampaigns = campaigns.filter(c => c.projectId === currentProject?.id);
+  const disapprovedCampaigns = projectCampaigns.filter(c => c.approvalStatus === 'disapproved');
 
   return (
     <div className="space-y-8">
