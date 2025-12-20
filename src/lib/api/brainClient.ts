@@ -131,6 +131,12 @@ export interface DecideLaunchResponse {
 // LAUNCH RUN TYPES (Single Entry Point)
 // ============================================
 
+// Real execution status - reflects actual ad platform execution
+export type RealExecutionStatus = 
+  | 'EXECUTED'           // Successfully created in ad platform
+  | 'EXECUTION_FAILED'   // API call failed
+  | 'EXECUTION_BLOCKED'; // Blocked by platform policy
+
 export type LaunchAccountStatus = 'DECIDED_FULL' | 'DECIDED_SOFT' | 'BLOCKED' | 'SKIPPED';
 
 export interface LaunchAccountResult {
@@ -140,6 +146,9 @@ export interface LaunchAccountResult {
   campaignId?: string;
   platformCampaignId?: string;
   reason?: string;
+  // Real execution feedback
+  executionStatus?: RealExecutionStatus;
+  platformError?: string;
 }
 
 export interface LaunchPlatformResult {
