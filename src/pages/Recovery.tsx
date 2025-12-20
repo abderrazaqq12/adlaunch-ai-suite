@@ -1,11 +1,10 @@
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { useProjectStore } from '@/stores/projectStore';
 import { useToast } from '@/hooks/use-toast';
 import { PlatformBadge } from '@/components/common/PlatformBadge';
-import { recover, memoryWrite, formatBrainError, type SafeVariant } from '@/lib/api/brainClient';
 import type { Campaign } from '@/types';
 import { 
   AlertTriangle, 
@@ -18,36 +17,26 @@ import {
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
+// Mock AI-generated alternatives for demonstration
+const mockAlternatives = [
+  {
+    id: '1',
+    original: 'Get GUARANTEED results in 24 hours!',
+    suggestion: 'See real results in as little as 24 hours',
+    reason: 'Removed guarantee claim which violates policy',
+  },
+  {
+    id: '2',
+    original: 'FREE forever - no hidden costs',
+    suggestion: 'Start free today with transparent pricing',
+    reason: 'Clarified pricing claim to avoid misleading language',
+  },
+];
+
 function DisapprovedCampaignCard({ campaign }: { campaign: Campaign }) {
   const [isRelaunching, setIsRelaunching] = useState(false);
-  const [isLoadingVariants, setIsLoadingVariants] = useState(false);
   const [selectedAlternative, setSelectedAlternative] = useState<string | null>(null);
-  const [alternatives, setAlternatives] = useState<SafeVariant[]>([]);
   const { toast } = useToast();
-
-  // Load recovery variants on mount
-  useEffect(() => {
-    const loadVariants = async () => {
-      setIsLoadingVariants(true);
-      try {
-        const result = await recover(
-          campaign.platform,
-          campaign.disapprovalReason || 'Policy violation',
-          { hook: campaign.name, body: '', cta: 'Learn More' }
-        );
-        setAlternatives(result.safeVariants);
-      } catch (error) {
-        toast({
-          title: 'Failed to load variants',
-          description: formatBrainError(error),
-          variant: 'destructive',
-        });
-      } finally {
-        setIsLoadingVariants(false);
-      }
-    };
-    loadVariants();
-  }, [campaign.platform, campaign.disapprovalReason, campaign.name, toast]);
 
   const handleRelaunch = async () => {
     if (!selectedAlternative) {
@@ -60,34 +49,15 @@ function DisapprovedCampaignCard({ campaign }: { campaign: Campaign }) {
     }
 
     setIsRelaunching(true);
-    try {
-      // Record recovery attempt to memory
-      await memoryWrite(campaign.platform, campaign.accountId, {
-        type: 'AD_DISAPPROVAL',
-        platform: campaign.platform,
-        accountId: campaign.accountId,
-        timestamp: new Date().toISOString(),
-        details: {
-          campaignId: campaign.id,
-          selectedVariant: selectedAlternative,
-          originalReason: campaign.disapprovalReason,
-        },
-        outcome: 'neutral',
-      });
-
-      toast({
-        title: 'Campaign Relaunched',
-        description: 'Your campaign has been resubmitted with the safe variant.',
-      });
-    } catch (error) {
-      toast({
-        title: 'Relaunch Failed',
-        description: formatBrainError(error),
-        variant: 'destructive',
-      });
-    } finally {
-      setIsRelaunching(false);
-    }
+    // TODO: Replace with actual API call
+    await new Promise(resolve => setTimeout(resolve, 2000));
+    
+    toast({
+      title: 'Campaign Relaunched',
+      description: 'Your campaign has been resubmitted with the safe variant.',
+    });
+    
+    setIsRelaunching(false);
   };
 
   return (
@@ -125,55 +95,53 @@ function DisapprovedCampaignCard({ campaign }: { campaign: Campaign }) {
             <p className="font-medium text-foreground">AI-Generated Safe Variants</p>
           </div>
           
-          {isLoadingVariants ? (
-            <div className="flex items-center justify-center py-8">
-              <RefreshCw className="h-6 w-6 animate-spin text-muted-foreground" />
-            </div>
-          ) : alternatives.length > 0 ? (
-            <div className="space-y-3">
-              {alternatives.map((alt, index) => (
-                <div
-                  key={index}
-                  onClick={() => setSelectedAlternative(String(index))}
-                  className={cn(
-                    'cursor-pointer rounded-lg border p-4 transition-all',
-                    selectedAlternative === String(index)
-                      ? 'border-primary bg-primary/5'
-                      : 'border-border hover:border-primary/50'
-                  )}
-                >
-                  <div className="flex items-start gap-3">
-                    <div className={cn(
-                      'flex h-6 w-6 shrink-0 items-center justify-center rounded-full border',
-                      selectedAlternative === String(index)
-                        ? 'border-primary bg-primary text-primary-foreground'
-                        : 'border-border'
-                    )}>
-                      {selectedAlternative === String(index) && <Check className="h-4 w-4" />}
+          <div className="space-y-3">
+            {mockAlternatives.map(alt => (
+              <div
+                key={alt.id}
+                onClick={() => setSelectedAlternative(alt.id)}
+                className={cn(
+                  'cursor-pointer rounded-lg border p-4 transition-all',
+                  selectedAlternative === alt.id
+                    ? 'border-primary bg-primary/5'
+                    : 'border-border hover:border-primary/50'
+                )}
+              >
+                <div className="flex items-start gap-3">
+                  <div className={cn(
+                    'flex h-6 w-6 shrink-0 items-center justify-center rounded-full border',
+                    selectedAlternative === alt.id
+                      ? 'border-primary bg-primary text-primary-foreground'
+                      : 'border-border'
+                  )}>
+                    {selectedAlternative === alt.id && <Check className="h-4 w-4" />}
+                  </div>
+                  <div className="flex-1 space-y-2">
+                    <div className="flex items-center gap-2">
+                      <X className="h-4 w-4 text-destructive" />
+                      <p className="text-sm text-muted-foreground line-through">
+                        {alt.original}
+                      </p>
                     </div>
-                    <div className="flex-1 space-y-2">
-                      <div className="flex items-center gap-2">
-                        <Check className="h-4 w-4 text-success" />
-                        <p className="text-sm text-foreground font-medium">
-                          {alt.hook}
-                        </p>
-                      </div>
-                      <p className="text-xs text-muted-foreground">{alt.body}</p>
-                      <div className="flex items-start gap-2 mt-2">
-                        <Lightbulb className="h-4 w-4 text-warning shrink-0" />
-                        <p className="text-xs text-muted-foreground">
-                          CTA: {alt.cta}
-                        </p>
-                      </div>
+                    <div className="flex items-center gap-2">
+                      <Check className="h-4 w-4 text-success" />
+                      <p className="text-sm text-foreground font-medium">
+                        {alt.suggestion}
+                      </p>
+                    </div>
+                    <div className="flex items-start gap-2 mt-2">
+                      <Lightbulb className="h-4 w-4 text-warning shrink-0" />
+                      <p className="text-xs text-muted-foreground">
+                        {alt.reason}
+                      </p>
                     </div>
                   </div>
                 </div>
-              ))}
-            </div>
-          ) : (
-            <p className="text-sm text-muted-foreground">No alternatives generated yet.</p>
-          )}
+              </div>
+            ))}
+          </div>
         </div>
+
         {/* Relaunch Button */}
         <Button
           onClick={handleRelaunch}

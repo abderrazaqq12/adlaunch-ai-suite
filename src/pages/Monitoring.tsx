@@ -1,15 +1,13 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useProjectStore } from '@/stores/projectStore';
-import { useToast } from '@/hooks/use-toast';
 import { ProjectGate } from '@/components/common/ProjectGate';
 import { PlatformBadge } from '@/components/common/PlatformBadge';
 import { StatusBadge } from '@/components/common/StatusBadge';
 import { StatCard } from '@/components/common/StatCard';
 import { ExecutionStatusBadge } from '@/components/common/ExecutionStatusBadge';
-import { optimize, formatBrainError, type OptimizationResult } from '@/lib/api/brainClient';
 import type { Platform, Campaign, AIAction, CampaignIntent } from '@/types';
 import { PLATFORM_OBJECTIVE_NAMES } from '@/types';
 import { 
@@ -29,44 +27,42 @@ import {
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
-function CampaignCard({ campaign, onOptimize }: { campaign: Campaign; onOptimize: (result: OptimizationResult) => void }) {
+// Mock AI actions for demonstration
+const mockAIActions: AIAction[] = [
+  {
+    id: '1',
+    campaignId: 'campaign-1',
+    timestamp: new Date(Date.now() - 3600000).toISOString(),
+    action: 'Increased bid by 15%',
+    reason: 'CPC below target threshold with high conversion rate',
+    result: 'CPC increased from $0.45 to $0.52',
+  },
+  {
+    id: '2',
+    campaignId: 'campaign-1',
+    timestamp: new Date(Date.now() - 7200000).toISOString(),
+    action: 'Paused underperforming ad variation',
+    reason: 'CTR 0.3% below campaign average after 5,000 impressions',
+    result: 'Budget reallocated to top performers',
+  },
+  {
+    id: '3',
+    campaignId: 'campaign-2',
+    timestamp: new Date(Date.now() - 10800000).toISOString(),
+    action: 'Expanded audience targeting',
+    reason: 'Campaign approaching daily budget limit with strong ROAS',
+    result: 'Added lookalike audience segment',
+  },
+];
+
+function CampaignCard({ campaign }: { campaign: Campaign }) {
   const [isPausing, setIsPausing] = useState(false);
-  const [isOptimizing, setIsOptimizing] = useState(false);
-  const { rules, updateCampaign } = useProjectStore();
-  const { toast } = useToast();
 
   const handlePauseResume = async () => {
     setIsPausing(true);
-    // TODO: Replace with actual platform API call
+    // TODO: Replace with actual API call
     await new Promise(resolve => setTimeout(resolve, 1000));
-    updateCampaign(campaign.id, { 
-      status: campaign.status === 'paused' ? 'active' : 'paused' 
-    });
     setIsPausing(false);
-  };
-
-  const handleOptimize = async () => {
-    setIsOptimizing(true);
-    try {
-      const campaignRules = rules.filter(r => r.projectId === campaign.projectId);
-      const result = await optimize(campaign.platform, campaign.metrics, campaignRules);
-      onOptimize(result);
-      
-      if (result.action !== 'NO_ACTION') {
-        toast({
-          title: `Optimization: ${result.action}`,
-          description: result.reason,
-        });
-      }
-    } catch (error) {
-      toast({
-        title: 'Optimization Failed',
-        description: formatBrainError(error),
-        variant: 'destructive',
-      });
-    } finally {
-      setIsOptimizing(false);
-    }
   };
 
   return (
@@ -261,10 +257,7 @@ function CampaignIntentHistory({ intents, campaigns }: { intents: CampaignIntent
 
 function MonitoringContent() {
   const [activeTab, setActiveTab] = useState<'all' | Platform>('all');
-  const [isRefreshing, setIsRefreshing] = useState(false);
-  const [aiActions, setAiActions] = useState<AIAction[]>([]);
-  const { campaigns, campaignIntents, currentProject, rules } = useProjectStore();
-  const { toast } = useToast();
+  const { campaigns, campaignIntents, currentProject } = useProjectStore();
 
   const projectCampaigns = campaigns.filter(c => c.projectId === currentProject?.id);
   const projectIntents = campaignIntents.filter(i => i.projectId === currentProject?.id);
@@ -281,54 +274,6 @@ function MonitoringContent() {
     ? projectCampaigns.reduce((sum, c) => sum + c.metrics.roas, 0) / projectCampaigns.length
     : 0;
 
-  const handleOptimizationResult = useCallback((result: OptimizationResult, campaign: Campaign) => {
-    if (result.action !== 'NO_ACTION') {
-      const newAction: AIAction = {
-        id: `action-${Date.now()}`,
-        campaignId: campaign.id,
-        timestamp: new Date().toISOString(),
-        action: result.action,
-        reason: result.reason,
-        result: result.changes.budget 
-          ? `Budget change: ${result.changes.budget > 0 ? '+' : ''}${result.changes.budget}%`
-          : result.changes.status 
-            ? `Status: ${result.changes.status}`
-            : undefined,
-      };
-      setAiActions(prev => [newAction, ...prev].slice(0, 20));
-    }
-  }, []);
-
-  const handleRefreshAll = async () => {
-    setIsRefreshing(true);
-    try {
-      const projectRules = rules.filter(r => r.projectId === currentProject?.id);
-      
-      // Run optimization check for each active campaign
-      for (const campaign of projectCampaigns.filter(c => c.status === 'active')) {
-        try {
-          const result = await optimize(campaign.platform, campaign.metrics, projectRules);
-          handleOptimizationResult(result, campaign);
-        } catch (error) {
-          console.error(`Optimization error for ${campaign.id}:`, error);
-        }
-      }
-      
-      toast({
-        title: 'Data Refreshed',
-        description: `Checked ${projectCampaigns.filter(c => c.status === 'active').length} active campaigns.`,
-      });
-    } catch (error) {
-      toast({
-        title: 'Refresh Failed',
-        description: formatBrainError(error),
-        variant: 'destructive',
-      });
-    } finally {
-      setIsRefreshing(false);
-    }
-  };
-
   return (
     <div className="space-y-8">
       {/* Header */}
@@ -339,9 +284,9 @@ function MonitoringContent() {
             Real-time campaign performance and AI decisions.
           </p>
         </div>
-        <Button variant="outline" onClick={handleRefreshAll} disabled={isRefreshing}>
-          <RefreshCw className={cn("mr-2 h-4 w-4", isRefreshing && "animate-spin")} />
-          {isRefreshing ? 'Refreshing...' : 'Refresh Data'}
+        <Button variant="outline">
+          <RefreshCw className="mr-2 h-4 w-4" />
+          Refresh Data
         </Button>
       </div>
 
@@ -385,11 +330,7 @@ function MonitoringContent() {
           {filteredCampaigns.length > 0 ? (
             <div className="space-y-4">
               {filteredCampaigns.map(campaign => (
-                <CampaignCard 
-                  key={campaign.id} 
-                  campaign={campaign}
-                  onOptimize={(result) => handleOptimizationResult(result, campaign)}
-                />
+                <CampaignCard key={campaign.id} campaign={campaign} />
               ))}
             </div>
           ) : (
@@ -435,17 +376,7 @@ function MonitoringContent() {
               </CardDescription>
             </CardHeader>
             <CardContent>
-              {aiActions.length > 0 ? (
-                <AIActionLog actions={aiActions} />
-              ) : (
-                <div className="flex flex-col items-center justify-center py-8 text-center">
-                  <Bot className="h-10 w-10 text-muted-foreground mb-3" />
-                  <p className="font-medium text-foreground">No AI Actions Yet</p>
-                  <p className="text-sm text-muted-foreground mt-1">
-                    AI actions will appear here after optimization runs.
-                  </p>
-                </div>
-              )}
+              <AIActionLog actions={mockAIActions} />
             </CardContent>
           </Card>
         </div>

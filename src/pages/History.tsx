@@ -1,9 +1,7 @@
-import { useEffect } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { useProjectStore } from '@/stores/projectStore';
 import { PlatformBadge } from '@/components/common/PlatformBadge';
-import { memoryWrite } from '@/lib/api/brainClient';
 import type { Platform, Campaign } from '@/types';
 import { 
   History as HistoryIcon, 
