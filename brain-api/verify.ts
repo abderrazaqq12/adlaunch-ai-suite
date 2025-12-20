@@ -106,6 +106,31 @@ async function runTests() {
     })
     console.log('Status:', res6.status)
     console.log('Body (should be BLOCKED_COMPLIANCE):', JSON.stringify(await res6.json(), null, 2))
+
+    // 7. Test Execution (Budget Capping)
+    console.log('\n7. Testing Execution Workers')
+    const executionPayload = {
+        idempotency_key: 'exec_run_alpha',
+        campaign_intent: {
+            name: 'Safe Launch',
+            description: 'A great product',
+            budget: 500 // Should be capped
+        },
+        execution_status: 'READY',
+        policy_risk_score: 5,
+        targets: [
+            { platform: 'google', accounts: ['acc_G1'] }, // Cap 20
+            { platform: 'tiktok', accounts: ['acc_T1'] }  // Cap 15
+        ]
+    }
+
+    const res7 = await app.request('/api/brain/v1/launch/run', {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(executionPayload)
+    })
+    console.log('Status:', res7.status)
+    console.log('Body (should be EXECUTED w/ caps):', JSON.stringify(await res7.json(), null, 2))
 }
 
 runTests().catch(console.error)
