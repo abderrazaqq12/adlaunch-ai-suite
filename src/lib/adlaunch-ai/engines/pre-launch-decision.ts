@@ -2,7 +2,7 @@ import {
     Platform,
     ExecutionStatus,
     AssetAnalysisResult
-} from '../../types';
+} from '../../../types';
 import { LaunchDecision, LaunchDecisionResult } from '../types';
 
 /**

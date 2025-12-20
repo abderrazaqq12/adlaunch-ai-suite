@@ -3,7 +3,7 @@ import {
     AutomationRule,
     RuleAction,
     RuleCondition
-} from '../../types';
+} from '../../../types';
 import { OptimizationResult, OptimizationChange } from '../types';
 
 /**
