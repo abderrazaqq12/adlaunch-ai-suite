@@ -131,6 +131,70 @@ async function runTests() {
     })
     console.log('Status:', res7.status)
     console.log('Body (should be EXECUTED w/ caps):', JSON.stringify(await res7.json(), null, 2))
+
+    // 8. Test Creative Filtering
+    console.log('\n8. Testing Creative Filtering')
+    const mixedPayload = {
+        idempotency_key: 'creative_filter_run_1',
+        campaign_intent: {
+            name: 'Mixed Quality Ad',
+            budget: 100,
+            creatives: [
+                { id: 'c1', type: 'text', content: { headline: 'Safe Headline' } },
+                { id: 'c2', type: 'text', content: { headline: 'Guaranteed Cure 100%' } } // Should be filtered
+            ]
+        },
+        execution_status: 'READY',
+        policy_risk_score: 5,
+        targets: [
+            { platform: 'google', accounts: ['acc_G_filter'] }
+        ]
+    }
+    // No credential, google worker might fail on execution but orchestrator should pass compliance check and reach execution attempt
+    // To avoid strict credential failure just for this check (which we want to fail execution maybe, or just check logs),
+    // we are testing Orchestrator logic mostly. The worker will fail missing creds, but returning EXECUTION_FAILED is fine.
+    // The important part is that "c2" is filtered. We'd see that in logs if we could, 
+    // or if we inspect payload. Since we can't inspect payload in response easily (LaunchRunItem payload is returned),
+    // we check response status.
+
+    const res8 = await app.request('/api/brain/v1/launch/run', {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(mixedPayload)
+    })
+
+    console.log('Status:', res8.status)
+    const body8 = await res8.json()
+    console.log('Body (Partial Success):', JSON.stringify(body8, null, 2))
+
+    // 9. Test Creative Auto-Replacement
+    console.log('\n9. Testing Creative Auto-Replacement')
+    const autoReplacePayload = {
+        idempotency_key: 'auto_replace_run_1',
+        campaign_intent: {
+            name: 'Auto-Repair Test',
+            budget: 100,
+            creatives: [
+                { id: 'c_bad', type: 'text', content: { headline: 'Guaranteed 100% cure for your problems!' } }
+            ]
+        },
+        execution_status: 'READY',
+        policy_risk_score: 5,
+        targets: [
+            { platform: 'google', accounts: ['acc_G_repair'] }
+        ]
+    }
+
+    const res9 = await app.request('/api/brain/v1/launch/run', {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(autoReplacePayload)
+    })
+
+    console.log('Status:', res9.status)
+    const body9 = await res9.json()
+    console.log('Body (Should show auto-repair):', JSON.stringify(body9, null, 2))
+    console.log('Expected: Creative should be auto-repaired (guaranteed->planned, 100%->effective, cure->help)')
 }
 
 runTests().catch(console.error)

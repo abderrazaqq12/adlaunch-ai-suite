@@ -40,6 +40,18 @@ export interface LaunchRun {
     items: LaunchRunItem[]
 }
 
+export interface Creative {
+    id: string
+    type: 'text' | 'video' | 'image'
+    content: {
+        headline?: string
+        adText?: string
+        description?: string
+        transcript?: string
+    }
+    url?: string
+}
+
 export interface LaunchRequest {
     idempotency_key: string
     campaign_intent: any

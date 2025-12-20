@@ -61,18 +61,23 @@ export class LaunchOrchestrator {
                         continue
                     }
 
-                    // B. Compliance Check (NEW)
-                    const complianceResult = await this.compliance.validate(request.campaign_intent, target.platform, projectId)
-                    if (!complianceResult.passed) {
+                    // B. Creative Compliance Check
+                    const filterResult = await this.compliance.filterBase(request.campaign_intent, target.platform, projectId)
+
+                    if (filterResult.allowedCount === 0) {
                         itemStatus = 'BLOCKED_COMPLIANCE'
                         blocked++
-                        runItems.push({ platform: target.platform, accountId, status: itemStatus, error: 'Compliance violations found: ' + complianceResult.issues.join(', ') })
+                        const issues = filterResult.excludedCreatives.flatMap(x => x.reasons).join(', ')
+                        runItems.push({ platform: target.platform, accountId, status: itemStatus, error: `All creatives blocked: ${issues}` })
                         continue
                     }
 
+                    // Use the filtered campaign for translation
+                    const campaignToUse = filterResult.filteredCampaign
+
                     // C. Translation
                     // We might wrap this in try/catch for validation errors
-                    const translation = this.translator.translate(request.campaign_intent, target.platform)
+                    const translation = this.translator.translate(campaignToUse, target.platform)
                     if (!translation) {
                         itemStatus = 'FAILED_VALIDATION'
                         failed++
