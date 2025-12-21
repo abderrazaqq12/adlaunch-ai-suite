@@ -1,4 +1,5 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
+import { authenticateRequest, createUserClient, extractBearerToken, unauthorizedResponse } from "../_shared/auth.ts";
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -6,78 +7,26 @@ const corsHeaders = {
 };
 
 /**
- * NORMALIZED EVENT SCHEMA
+ * NORMALIZED EVENT SCHEMA + JWT Authentication
  * 
- * Single source of truth for ALL system events.
- * Every action, decision, skip, and failure is traceable, replayable, and auditable.
- * 
- * NO component may emit custom logs outside this schema.
- * Every automation decision MUST emit an event.
- * Every blocked action MUST emit an event.
- * Skipped actions MUST include reason.
+ * All operations require a valid JWT token and are scoped to auth.uid()
  */
 
-// ============================================================================
-// EVENT SCHEMA TYPES
-// ============================================================================
-
 type EventType = 
-  // Asset Events
-  | 'ASSET_UPLOADED'
-  | 'ASSET_ANALYZING'
-  | 'ASSET_ANALYZED'
-  | 'ASSET_APPROVED'
-  | 'ASSET_BLOCKED'
-  | 'ASSET_MARKED_READY'
-  | 'ASSET_UNMARKED_READY'
-  // Campaign Events
-  | 'CAMPAIGN_INTENT_CREATED'
-  | 'CAMPAIGN_INTENT_VALIDATED'
-  | 'CAMPAIGN_PUBLISHED'
-  | 'CAMPAIGN_PAUSED'
-  | 'CAMPAIGN_RESUMED'
-  | 'CAMPAIGN_STOPPED'
-  | 'CAMPAIGN_BLOCKED'
+  | 'ASSET_UPLOADED' | 'ASSET_ANALYZING' | 'ASSET_ANALYZED' | 'ASSET_APPROVED' 
+  | 'ASSET_BLOCKED' | 'ASSET_MARKED_READY' | 'ASSET_UNMARKED_READY'
+  | 'CAMPAIGN_INTENT_CREATED' | 'CAMPAIGN_INTENT_VALIDATED' | 'CAMPAIGN_PUBLISHED' 
+  | 'CAMPAIGN_PAUSED' | 'CAMPAIGN_RESUMED' | 'CAMPAIGN_STOPPED' | 'CAMPAIGN_BLOCKED'
   | 'CAMPAIGN_DISAPPROVED'
-  // Automation Events
-  | 'AUTOMATION_RULE_CREATED'
-  | 'AUTOMATION_RULE_ENABLED'
-  | 'AUTOMATION_RULE_DISABLED'
-  | 'AUTOMATION_TRIGGERED'
-  | 'AUTOMATION_SKIPPED'
-  | 'AUTOMATION_ACTION_EXECUTED'
-  | 'AUTOMATION_COOLDOWN_STARTED'
-  | 'AUTOMATION_COOLDOWN_RESET'
-  // Guard Events
-  | 'STATE_GUARD_BLOCKED'
-  | 'STATE_TRANSITION_BLOCKED'
-  // Recovery Events
-  | 'RECOVERY_INITIATED'
-  | 'RECOVERY_COMPLETED'
-  // AI Events
-  | 'AI_DECISION_MADE'
-  | 'AI_ACTION_EXECUTED';
+  | 'AUTOMATION_RULE_CREATED' | 'AUTOMATION_RULE_ENABLED' | 'AUTOMATION_RULE_DISABLED'
+  | 'AUTOMATION_TRIGGERED' | 'AUTOMATION_SKIPPED' | 'AUTOMATION_ACTION_EXECUTED'
+  | 'AUTOMATION_COOLDOWN_STARTED' | 'AUTOMATION_COOLDOWN_RESET'
+  | 'STATE_GUARD_BLOCKED' | 'STATE_TRANSITION_BLOCKED'
+  | 'RECOVERY_INITIATED' | 'RECOVERY_COMPLETED'
+  | 'AI_DECISION_MADE' | 'AI_ACTION_EXECUTED';
 
 type EventSource = 'UI' | 'AI' | 'AUTOMATION' | 'SYSTEM';
 type EntityType = 'ASSET' | 'CAMPAIGN' | 'AD_ACCOUNT' | 'RULE' | 'INTENT' | 'SYSTEM';
-
-interface NormalizedEvent {
-  eventId: string;
-  eventType: EventType;
-  source: EventSource;
-  entityType: EntityType;
-  entityId: string;
-  previousState?: string;
-  newState?: string;
-  action?: string;
-  reason?: string;
-  metadata?: Record<string, unknown>;
-  timestamp: string; // ISO8601
-}
-
-// ============================================================================
-// EVENT SCHEMA VALIDATION
-// ============================================================================
 
 const VALID_EVENT_TYPES: EventType[] = [
   'ASSET_UPLOADED', 'ASSET_ANALYZING', 'ASSET_ANALYZED', 'ASSET_APPROVED', 
@@ -96,166 +45,24 @@ const VALID_EVENT_TYPES: EventType[] = [
 const VALID_SOURCES: EventSource[] = ['UI', 'AI', 'AUTOMATION', 'SYSTEM'];
 const VALID_ENTITY_TYPES: EntityType[] = ['ASSET', 'CAMPAIGN', 'AD_ACCOUNT', 'RULE', 'INTENT', 'SYSTEM'];
 
-interface ValidationResult {
-  valid: boolean;
-  errors: string[];
-}
-
-function validateEventSchema(event: Partial<NormalizedEvent>): ValidationResult {
-  const errors: string[] = [];
-
-  // Required fields
-  if (!event.eventId) errors.push('eventId is required');
-  if (!event.eventType) errors.push('eventType is required');
-  if (!event.source) errors.push('source is required');
-  if (!event.entityType) errors.push('entityType is required');
-  if (!event.entityId) errors.push('entityId is required');
-  if (!event.timestamp) errors.push('timestamp is required');
-
-  // Enum validation
-  if (event.eventType && !VALID_EVENT_TYPES.includes(event.eventType)) {
-    errors.push(`Invalid eventType: ${event.eventType}`);
-  }
-  if (event.source && !VALID_SOURCES.includes(event.source)) {
-    errors.push(`Invalid source: ${event.source}`);
-  }
-  if (event.entityType && !VALID_ENTITY_TYPES.includes(event.entityType)) {
-    errors.push(`Invalid entityType: ${event.entityType}`);
-  }
-
-  // Timestamp format validation (ISO8601)
-  if (event.timestamp) {
-    const date = new Date(event.timestamp);
-    if (isNaN(date.getTime())) {
-      errors.push('timestamp must be valid ISO8601 format');
-    }
-  }
-
-  return {
-    valid: errors.length === 0,
-    errors,
-  };
-}
-
-// ============================================================================
-// EVENT STORE
-// ============================================================================
-
-// In-memory event store (in production, use Supabase table)
-const eventStore: NormalizedEvent[] = [];
-
-function generateEventId(): string {
-  return `evt_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-}
-
-function createEvent(
-  eventType: EventType,
-  source: EventSource,
-  entityType: EntityType,
-  entityId: string,
-  options: {
-    previousState?: string;
-    newState?: string;
-    action?: string;
-    reason?: string;
-    metadata?: Record<string, unknown>;
-  } = {}
-): NormalizedEvent {
-  const event: NormalizedEvent = {
-    eventId: generateEventId(),
-    eventType,
-    source,
-    entityType,
-    entityId,
-    timestamp: new Date().toISOString(),
-    ...options,
-  };
-
-  // Validate before storing
-  const validation = validateEventSchema(event);
-  if (!validation.valid) {
-    console.error('[events] Schema validation failed:', validation.errors);
-    throw new Error(`Event schema validation failed: ${validation.errors.join(', ')}`);
-  }
-
-  eventStore.unshift(event);
-  console.log(`[events] Stored: ${eventType} | ${entityType}/${entityId} | source=${source}`);
-  
-  return event;
-}
-
-// ============================================================================
-// SEED DATA - Sample events following normalized schema
-// ============================================================================
-
-// AI Action Executed
-createEvent('AI_ACTION_EXECUTED', 'AI', 'CAMPAIGN', 'camp_1', {
-  action: 'PAUSE',
-  reason: 'CPA exceeded threshold ($52.30 > $50.00)',
-  previousState: 'ACTIVE',
-  newState: 'PAUSED',
-  metadata: { ruleId: 'rule_1', metric: 'cpa', value: 52.3, threshold: 50 },
-});
-
-// Automation Triggered + Cooldown
-createEvent('AUTOMATION_TRIGGERED', 'AUTOMATION', 'RULE', 'rule_1', {
-  action: 'PAUSE_CAMPAIGN',
-  reason: 'Condition met: cpa > 50',
-  previousState: 'ACTIVE',
-  newState: 'COOLDOWN',
-  metadata: { targetCampaignId: 'camp_1' },
-});
-
-// Asset Analyzed
-createEvent('ASSET_ANALYZED', 'SYSTEM', 'ASSET', 'asset_123', {
-  previousState: 'ANALYZING',
-  newState: 'APPROVED',
-  metadata: { riskScore: 15, qualityScore: 82 },
-});
-
-// Campaign Published
-createEvent('CAMPAIGN_PUBLISHED', 'UI', 'CAMPAIGN', 'camp_2', {
-  newState: 'ACTIVE',
-  metadata: { platform: 'GOOGLE', accountId: 'acc_google_1', assetCount: 3 },
-});
-
-// State Guard Blocked
-createEvent('STATE_GUARD_BLOCKED', 'SYSTEM', 'ASSET', 'asset_456', {
-  action: 'MARK_READY_FOR_LAUNCH',
-  reason: 'Asset risk score (65) exceeds threshold (50)',
-  metadata: { guardName: 'guardAssetReadyForLaunch', riskScore: 65, threshold: 50 },
-});
-
-// Automation Skipped
-createEvent('AUTOMATION_SKIPPED', 'AUTOMATION', 'RULE', 'rule_2', {
-  action: 'SCALE_BUDGET',
-  reason: 'Daily action limit reached (10/10)',
-  metadata: { campaignId: 'camp_3', actionsToday: 10, maxActionsPerDay: 10 },
-});
-
-// Campaign Blocked
-createEvent('CAMPAIGN_BLOCKED', 'SYSTEM', 'CAMPAIGN', 'camp_4', {
-  action: 'PUBLISH',
-  reason: 'Ad accounts missing LAUNCH permission: acc_snapchat_1',
-  metadata: { guardName: 'guardCampaignPublish', blockedAccounts: ['acc_snapchat_1'] },
-});
-
-// Campaign Disapproved
-createEvent('CAMPAIGN_DISAPPROVED', 'SYSTEM', 'CAMPAIGN', 'camp_3', {
-  previousState: 'ACTIVE',
-  newState: 'DISAPPROVED',
-  reason: 'Policy violation: Misleading claims in ad copy',
-  metadata: { platform: 'TIKTOK', policyCode: 'AD_POLICY_001' },
-});
-
-// ============================================================================
-// HTTP HANDLER
-// ============================================================================
-
 serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders });
   }
+
+  // ===================== JWT AUTHENTICATION =====================
+  const authResult = await authenticateRequest(req);
+  if (!authResult.authenticated) {
+    console.error('[events] Auth failed:', authResult.error);
+    return unauthorizedResponse(authResult.error || 'Unauthorized', corsHeaders);
+  }
+  
+  const userId = authResult.userId!;
+  const token = extractBearerToken(req)!;
+  const supabase = createUserClient(token);
+  
+  console.log(`[events] Authenticated user: ${userId}`);
+  // ==============================================================
 
   const url = new URL(req.url);
   const pathParts = url.pathname.split('/').filter(Boolean);
@@ -269,39 +76,38 @@ serve(async (req) => {
       const entityId = url.searchParams.get('entityId');
       const eventType = url.searchParams.get('eventType') as EventType | null;
       const source = url.searchParams.get('source') as EventSource | null;
-      const limit = parseInt(url.searchParams.get('limit') || '50');
-      const since = url.searchParams.get('since'); // ISO timestamp
+      const limit = Math.min(parseInt(url.searchParams.get('limit') || '50'), 100);
+      const since = url.searchParams.get('since');
       
-      let filtered = [...eventStore];
+      let query = supabase
+        .from('events')
+        .select('*')
+        .order('timestamp', { ascending: false })
+        .limit(limit);
       
       if (entityType) {
-        filtered = filtered.filter(e => e.entityType === entityType);
+        query = query.eq('entity_type', entityType);
       }
-      
       if (entityId) {
-        filtered = filtered.filter(e => e.entityId === entityId);
+        query = query.eq('entity_id', entityId);
       }
-      
       if (eventType) {
-        filtered = filtered.filter(e => e.eventType === eventType);
+        query = query.eq('event_type', eventType);
       }
-
       if (source) {
-        filtered = filtered.filter(e => e.source === source);
+        query = query.eq('source', source);
       }
-      
       if (since) {
-        const sinceDate = new Date(since);
-        filtered = filtered.filter(e => new Date(e.timestamp) > sinceDate);
+        query = query.gte('timestamp', since);
       }
       
-      // Apply limit
-      filtered = filtered.slice(0, Math.min(limit, 100));
+      const { data: events, error, count } = await query;
+      
+      if (error) throw error;
 
       return new Response(JSON.stringify({ 
-        events: filtered,
-        total: filtered.length,
-        hasMore: eventStore.length > limit,
+        events: events || [],
+        total: events?.length || 0,
       }), {
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       });
@@ -313,17 +119,25 @@ serve(async (req) => {
         eventTypes: VALID_EVENT_TYPES,
         sources: VALID_SOURCES,
         entityTypes: VALID_ENTITY_TYPES,
-        requiredFields: ['eventId', 'eventType', 'source', 'entityType', 'entityId', 'timestamp'],
-        optionalFields: ['previousState', 'newState', 'action', 'reason', 'metadata'],
+        requiredFields: ['event_id', 'event_type', 'source', 'entity_type', 'entity_id', 'timestamp'],
+        optionalFields: ['previous_state', 'new_state', 'action', 'reason', 'metadata'],
       }), {
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       });
     }
 
     // GET /events/{id} - Get single event
-    if (req.method === 'GET' && pathParts.length === 2 && pathParts[1] !== 'summary' && pathParts[1] !== 'schema') {
+    if (req.method === 'GET' && pathParts.length === 2 && 
+        !['summary', 'schema', 'ai-actions', 'blocked'].includes(pathParts[1])) {
       const eventId = pathParts[1];
-      const event = eventStore.find(e => e.eventId === eventId);
+      
+      const { data: event, error } = await supabase
+        .from('events')
+        .select('*')
+        .eq('event_id', eventId)
+        .maybeSingle();
+      
+      if (error) throw error;
       
       if (!event) {
         return new Response(JSON.stringify({ error: 'Event not found' }), {
@@ -341,24 +155,23 @@ serve(async (req) => {
     if (req.method === 'POST' && pathParts.length === 1) {
       const body = await req.json();
       const { 
-        eventType, 
+        event_type, 
         source, 
-        entityType, 
-        entityId, 
-        previousState, 
-        newState, 
+        entity_type, 
+        entity_id, 
+        previous_state, 
+        new_state, 
         action, 
         reason, 
         metadata 
       } = body;
 
       // Validate required fields
-      if (!eventType || !source || !entityType || !entityId) {
+      if (!event_type || !source || !entity_type || !entity_id) {
         return new Response(JSON.stringify({ 
           error: 'SCHEMA_VIOLATION',
           message: 'Missing required fields',
-          required: ['eventType', 'source', 'entityType', 'entityId'],
-          received: { eventType, source, entityType, entityId },
+          required: ['event_type', 'source', 'entity_type', 'entity_id'],
         }), {
           status: 400,
           headers: { ...corsHeaders, 'Content-Type': 'application/json' },
@@ -366,10 +179,10 @@ serve(async (req) => {
       }
 
       // Validate enums
-      if (!VALID_EVENT_TYPES.includes(eventType)) {
+      if (!VALID_EVENT_TYPES.includes(event_type)) {
         return new Response(JSON.stringify({ 
           error: 'SCHEMA_VIOLATION',
-          message: `Invalid eventType: ${eventType}`,
+          message: `Invalid event_type: ${event_type}`,
           validEventTypes: VALID_EVENT_TYPES,
         }), {
           status: 400,
@@ -388,10 +201,10 @@ serve(async (req) => {
         });
       }
 
-      if (!VALID_ENTITY_TYPES.includes(entityType)) {
+      if (!VALID_ENTITY_TYPES.includes(entity_type)) {
         return new Response(JSON.stringify({ 
           error: 'SCHEMA_VIOLATION',
-          message: `Invalid entityType: ${entityType}`,
+          message: `Invalid entity_type: ${entity_type}`,
           validEntityTypes: VALID_ENTITY_TYPES,
         }), {
           status: 400,
@@ -399,40 +212,55 @@ serve(async (req) => {
         });
       }
 
-      try {
-        const newEvent = createEvent(eventType, source, entityType, entityId, {
-          previousState,
-          newState,
+      const eventId = `evt_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+      
+      const { data: newEvent, error } = await supabase
+        .from('events')
+        .insert({
+          event_id: eventId,
+          event_type,
+          source,
+          entity_type,
+          entity_id,
+          user_id: userId,
+          previous_state,
+          new_state,
           action,
           reason,
-          metadata,
-        });
+          metadata: metadata || {},
+        })
+        .select()
+        .single();
 
-        return new Response(JSON.stringify(newEvent), {
-          status: 201,
-          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-        });
-      } catch (error) {
-        return new Response(JSON.stringify({ 
-          error: 'SCHEMA_VIOLATION',
-          message: error instanceof Error ? error.message : 'Schema validation failed',
-        }), {
-          status: 400,
-          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-        });
-      }
+      if (error) throw error;
+
+      console.log(`[events] Created: ${event_type} | ${entity_type}/${entity_id}`);
+
+      return new Response(JSON.stringify(newEvent), {
+        status: 201,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
     }
 
     // GET /events/summary - Aggregated event summary
     if (req.method === 'GET' && pathParts.length === 2 && pathParts[1] === 'summary') {
       const hours = parseInt(url.searchParams.get('hours') || '24');
-      const cutoff = new Date(Date.now() - hours * 60 * 60 * 1000);
-      const recentEvents = eventStore.filter(e => new Date(e.timestamp) > cutoff);
+      const cutoff = new Date(Date.now() - hours * 60 * 60 * 1000).toISOString();
+      
+      const { data: events, error } = await supabase
+        .from('events')
+        .select('*')
+        .gte('timestamp', cutoff)
+        .order('timestamp', { ascending: false });
+      
+      if (error) throw error;
+
+      const recentEvents = events || [];
       
       const summary = {
         timeRange: {
           hours,
-          since: cutoff.toISOString(),
+          since: cutoff,
           until: new Date().toISOString(),
         },
         totalEvents: recentEvents.length,
@@ -440,9 +268,9 @@ serve(async (req) => {
         bySource: {} as Record<string, number>,
         byEntityType: {} as Record<string, number>,
         blockedActions: recentEvents.filter(e => 
-          e.eventType === 'STATE_GUARD_BLOCKED' || 
-          e.eventType === 'STATE_TRANSITION_BLOCKED' ||
-          e.eventType === 'CAMPAIGN_BLOCKED'
+          e.event_type === 'STATE_GUARD_BLOCKED' || 
+          e.event_type === 'STATE_TRANSITION_BLOCKED' ||
+          e.event_type === 'CAMPAIGN_BLOCKED'
         ).length,
         automationEvents: recentEvents.filter(e => e.source === 'AUTOMATION').length,
         aiEvents: recentEvents.filter(e => e.source === 'AI').length,
@@ -450,9 +278,9 @@ serve(async (req) => {
       };
 
       recentEvents.forEach(e => {
-        summary.byEventType[e.eventType] = (summary.byEventType[e.eventType] || 0) + 1;
+        summary.byEventType[e.event_type] = (summary.byEventType[e.event_type] || 0) + 1;
         summary.bySource[e.source] = (summary.bySource[e.source] || 0) + 1;
-        summary.byEntityType[e.entityType] = (summary.byEntityType[e.entityType] || 0) + 1;
+        summary.byEntityType[e.entity_type] = (summary.byEntityType[e.entity_type] || 0) + 1;
       });
 
       return new Response(JSON.stringify(summary), {
@@ -460,37 +288,22 @@ serve(async (req) => {
       });
     }
 
-    // GET /events/stream/{entityType}/{entityId} - Get event stream for specific entity
-    if (req.method === 'GET' && pathParts.length === 4 && pathParts[1] === 'stream') {
-      const entityType = pathParts[2] as EntityType;
-      const entityId = pathParts[3];
-      const limit = parseInt(url.searchParams.get('limit') || '20');
-
-      const entityEvents = eventStore
-        .filter(e => e.entityType === entityType && e.entityId === entityId)
-        .slice(0, limit);
-
-      return new Response(JSON.stringify({
-        entityType,
-        entityId,
-        events: entityEvents,
-        total: entityEvents.length,
-      }), {
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-      });
-    }
-
     // GET /events/ai-actions - AI actions derived from event stream
     if (req.method === 'GET' && pathParts.length === 2 && pathParts[1] === 'ai-actions') {
-      const limit = parseInt(url.searchParams.get('limit') || '20');
+      const limit = Math.min(parseInt(url.searchParams.get('limit') || '20'), 100);
       
-      const aiActions = eventStore
-        .filter(e => e.source === 'AI' || e.eventType.startsWith('AI_'))
-        .slice(0, limit);
+      const { data: events, error } = await supabase
+        .from('events')
+        .select('*')
+        .or('source.eq.AI,event_type.ilike.AI_%')
+        .order('timestamp', { ascending: false })
+        .limit(limit);
+      
+      if (error) throw error;
 
       return new Response(JSON.stringify({
-        actions: aiActions,
-        total: aiActions.length,
+        actions: events || [],
+        total: events?.length || 0,
       }), {
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       });
@@ -498,36 +311,20 @@ serve(async (req) => {
 
     // GET /events/blocked - All blocked actions
     if (req.method === 'GET' && pathParts.length === 2 && pathParts[1] === 'blocked') {
-      const limit = parseInt(url.searchParams.get('limit') || '20');
+      const limit = Math.min(parseInt(url.searchParams.get('limit') || '20'), 100);
       
-      const blockedEvents = eventStore
-        .filter(e => 
-          e.eventType === 'STATE_GUARD_BLOCKED' || 
-          e.eventType === 'STATE_TRANSITION_BLOCKED' ||
-          e.eventType === 'CAMPAIGN_BLOCKED' ||
-          e.eventType === 'AUTOMATION_SKIPPED'
-        )
-        .slice(0, limit);
+      const { data: events, error } = await supabase
+        .from('events')
+        .select('*')
+        .or('event_type.eq.STATE_GUARD_BLOCKED,event_type.eq.STATE_TRANSITION_BLOCKED,event_type.eq.CAMPAIGN_BLOCKED,event_type.eq.AUTOMATION_SKIPPED')
+        .order('timestamp', { ascending: false })
+        .limit(limit);
+      
+      if (error) throw error;
 
       return new Response(JSON.stringify({
-        events: blockedEvents,
-        total: blockedEvents.length,
-      }), {
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-      });
-    }
-
-    // GET /events/automation - Automation history
-    if (req.method === 'GET' && pathParts.length === 2 && pathParts[1] === 'automation') {
-      const limit = parseInt(url.searchParams.get('limit') || '20');
-      
-      const automationEvents = eventStore
-        .filter(e => e.source === 'AUTOMATION' || e.eventType.startsWith('AUTOMATION_'))
-        .slice(0, limit);
-
-      return new Response(JSON.stringify({
-        events: automationEvents,
-        total: automationEvents.length,
+        blocked: events || [],
+        total: events?.length || 0,
       }), {
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       });
@@ -540,8 +337,9 @@ serve(async (req) => {
 
   } catch (error) {
     console.error('[events] Error:', error);
-    return new Response(JSON.stringify({
-      error: error instanceof Error ? error.message : 'Internal error',
+    return new Response(JSON.stringify({ 
+      error: 'Internal server error',
+      message: error instanceof Error ? error.message : 'Unknown error',
     }), {
       status: 500,
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },

@@ -1,19 +1,19 @@
 project_id = "fzngibjbhrirkdbpxmii"
 
 [functions.analyze-asset]
-verify_jwt = false
+verify_jwt = true
 
 [functions.assets]
-verify_jwt = false
+verify_jwt = true
 
 [functions.ad-accounts]
-verify_jwt = false
+verify_jwt = true
 
 [functions.campaigns]
-verify_jwt = false
+verify_jwt = true
 
 [functions.automation]
-verify_jwt = false
+verify_jwt = true
 
 [functions.events]
-verify_jwt = false
+verify_jwt = true

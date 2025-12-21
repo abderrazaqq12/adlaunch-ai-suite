@@ -1,4 +1,5 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
+import { authenticateRequest, createUserClient, extractBearerToken, unauthorizedResponse } from "../_shared/auth.ts";
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -6,24 +7,12 @@ const corsHeaders = {
 };
 
 /**
- * ASSET STATE MACHINE with STATE GUARDS
+ * ASSET STATE MACHINE with STATE GUARDS + JWT Authentication
  * 
- * States:
- * - UPLOADED: Asset uploaded, no AI analysis yet
- * - ANALYZING: AI compliance running (transient)
- * - APPROVED: Passed AI compliance
- * - BLOCKED: Failed compliance
- * - READY_FOR_LAUNCH: Approved + user confirmed ready
- * - USED_IN_CAMPAIGN: Currently used in active campaign
- * 
- * GUARDS for READY_FOR_LAUNCH:
- * - asset.state === "APPROVED"
- * - asset.riskScore <= allowedThreshold (50)
- * - asset.platformCompatibility.includes(targetPlatform)
+ * All operations require a valid JWT token and are scoped to auth.uid()
  */
 
 type AssetState = 'UPLOADED' | 'ANALYZING' | 'APPROVED' | 'BLOCKED' | 'READY_FOR_LAUNCH' | 'USED_IN_CAMPAIGN';
-
 type AssetAction = 
   | 'ANALYZE'
   | 'VIEW_AI_DECISION'
@@ -38,7 +27,6 @@ interface AssetStateConfig {
   canTransitionTo: AssetState[];
 }
 
-// State machine configuration
 const ASSET_STATE_CONFIG: Record<AssetState, AssetStateConfig> = {
   UPLOADED: {
     allowedActions: ['ANALYZE'],
@@ -79,19 +67,15 @@ interface AssetReadyGuardConfig {
   riskThreshold: number;
 }
 
-/**
- * ASSET → READY_FOR_LAUNCH Guard (Pure Function)
- */
 function guardAssetReadyForLaunch(
   asset: {
     state: string;
-    riskScore?: number | null;
-    platformCompatibility?: string[];
+    risk_score?: number | null;
+    platform_compatibility?: string[];
   },
   config: AssetReadyGuardConfig = { riskThreshold: 50 },
   targetPlatform?: string
 ): GuardResult {
-  // Guard 1: state must be APPROVED
   if (asset.state !== 'APPROVED') {
     return {
       allowed: false,
@@ -99,22 +83,20 @@ function guardAssetReadyForLaunch(
     };
   }
 
-  // Guard 2: riskScore must be within threshold
-  if (asset.riskScore !== null && asset.riskScore !== undefined) {
-    if (asset.riskScore > config.riskThreshold) {
+  if (asset.risk_score !== null && asset.risk_score !== undefined) {
+    if (asset.risk_score > config.riskThreshold) {
       return {
         allowed: false,
-        reason: `Asset risk score (${asset.riskScore}) exceeds threshold (${config.riskThreshold})`,
+        reason: `Asset risk score (${asset.risk_score}) exceeds threshold (${config.riskThreshold})`,
       };
     }
   }
 
-  // Guard 3: Platform compatibility
-  if (targetPlatform && asset.platformCompatibility) {
-    if (!asset.platformCompatibility.includes(targetPlatform)) {
+  if (targetPlatform && asset.platform_compatibility) {
+    if (!asset.platform_compatibility.includes(targetPlatform)) {
       return {
         allowed: false,
-        reason: `Asset not compatible with platform: ${targetPlatform}. Compatible: ${asset.platformCompatibility.join(', ')}`,
+        reason: `Asset not compatible with platform: ${targetPlatform}. Compatible: ${asset.platform_compatibility.join(', ')}`,
       };
     }
   }
@@ -138,67 +120,6 @@ function canTransition(currentState: AssetState, targetState: AssetState): boole
   return ASSET_STATE_CONFIG[currentState]?.canTransitionTo.includes(targetState) || false;
 }
 
-// ============================================================================
-// NORMALIZED EVENT EMISSION
-// ============================================================================
-
-type EventType = 
-  | 'ASSET_UPLOADED' | 'ASSET_ANALYZING' | 'ASSET_ANALYZED' 
-  | 'ASSET_APPROVED' | 'ASSET_BLOCKED' | 'ASSET_MARKED_READY' | 'ASSET_UNMARKED_READY'
-  | 'STATE_GUARD_BLOCKED' | 'STATE_TRANSITION_BLOCKED';
-
-type EventSource = 'UI' | 'AI' | 'AUTOMATION' | 'SYSTEM';
-
-interface NormalizedEvent {
-  eventId: string;
-  eventType: EventType;
-  source: EventSource;
-  entityType: 'ASSET';
-  entityId: string;
-  previousState?: string;
-  newState?: string;
-  action?: string;
-  reason?: string;
-  metadata?: Record<string, unknown>;
-  timestamp: string;
-}
-
-const eventStore: NormalizedEvent[] = [];
-
-function generateEventId(): string {
-  return `evt_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-}
-
-function emitEvent(
-  eventType: EventType,
-  source: EventSource,
-  entityId: string,
-  options: {
-    previousState?: string;
-    newState?: string;
-    action?: string;
-    reason?: string;
-    metadata?: Record<string, unknown>;
-  } = {}
-): NormalizedEvent {
-  const event: NormalizedEvent = {
-    eventId: generateEventId(),
-    eventType,
-    source,
-    entityType: 'ASSET',
-    entityId,
-    timestamp: new Date().toISOString(),
-    ...options,
-  };
-  eventStore.unshift(event);
-  console.log(`[assets] EVENT: ${eventType} | ASSET/${entityId} | source=${source}`);
-  return event;
-}
-
-// Mock database
-const mockAssets: Map<string, any> = new Map();
-
-// Risk threshold configuration
 const RISK_THRESHOLD = 50;
 
 serve(async (req) => {
@@ -206,36 +127,62 @@ serve(async (req) => {
     return new Response(null, { headers: corsHeaders });
   }
 
+  // ===================== JWT AUTHENTICATION =====================
+  const authResult = await authenticateRequest(req);
+  if (!authResult.authenticated) {
+    console.error('[assets] Auth failed:', authResult.error);
+    return unauthorizedResponse(authResult.error || 'Unauthorized', corsHeaders);
+  }
+  
+  const userId = authResult.userId!;
+  const token = extractBearerToken(req)!;
+  const supabase = createUserClient(token);
+  
+  console.log(`[assets] Authenticated user: ${userId}`);
+  // ==============================================================
+
   const url = new URL(req.url);
   const pathParts = url.pathname.split('/').filter(Boolean);
   
   console.log(`[assets] ${req.method} ${url.pathname}`);
 
   try {
-    // GET /assets - List all assets with state and allowed actions
+    // GET /assets - List user's assets
     if (req.method === 'GET' && pathParts.length === 1) {
-      const assets = Array.from(mockAssets.values()).map(asset => ({
-        id: asset.id,
-        type: asset.type,
-        name: asset.name,
-        state: asset.state,
-        riskScore: asset.riskScore || null,
-        qualityScore: asset.qualityScore || null,
-        platformCompatibility: asset.platformCompatibility || [],
-        allowedActions: getAllowedActions(asset.state),
-        createdAt: asset.createdAt,
-        updatedAt: asset.updatedAt,
+      const { data: assets, error } = await supabase
+        .from('assets')
+        .select('*')
+        .order('created_at', { ascending: false });
+
+      if (error) {
+        console.error('[assets] DB error:', error);
+        throw error;
+      }
+
+      const enrichedAssets = (assets || []).map(asset => ({
+        ...asset,
+        allowedActions: getAllowedActions(asset.state as AssetState),
       }));
 
-      return new Response(JSON.stringify({ assets }), {
+      return new Response(JSON.stringify({ assets: enrichedAssets }), {
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       });
     }
 
     // GET /assets/{id} - Get single asset
-    if (req.method === 'GET' && pathParts.length === 2) {
+    if (req.method === 'GET' && pathParts.length === 2 && pathParts[1] !== 'events') {
       const assetId = pathParts[1];
-      const asset = mockAssets.get(assetId);
+      
+      const { data: asset, error } = await supabase
+        .from('assets')
+        .select('*')
+        .eq('id', assetId)
+        .maybeSingle();
+      
+      if (error) {
+        console.error('[assets] DB error:', error);
+        throw error;
+      }
       
       if (!asset) {
         return new Response(JSON.stringify({ error: 'Asset not found' }), {
@@ -246,7 +193,7 @@ serve(async (req) => {
 
       return new Response(JSON.stringify({
         ...asset,
-        allowedActions: getAllowedActions(asset.state),
+        allowedActions: getAllowedActions(asset.state as AssetState),
       }), {
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       });
@@ -255,31 +202,66 @@ serve(async (req) => {
     // POST /assets - Create new asset
     if (req.method === 'POST' && pathParts.length === 1) {
       const body = await req.json();
-      const assetId = `asset_${Date.now()}`;
-      const now = new Date().toISOString();
       
-      const newAsset = {
-        id: assetId,
-        type: body.type,
-        name: body.name,
-        url: body.url,
-        content: body.content,
-        state: 'UPLOADED' as AssetState,
-        riskScore: null,
-        qualityScore: null,
-        platformCompatibility: body.platformCompatibility || ['GOOGLE', 'TIKTOK', 'SNAPCHAT'],
-        issues: [],
-        rejectionReasons: [],
-        createdAt: now,
-        updatedAt: now,
-      };
+      // Get or create default project
+      let projectId = body.project_id;
+      if (!projectId) {
+        const { data: projects } = await supabase
+          .from('projects')
+          .select('id')
+          .limit(1);
+        
+        if (projects && projects.length > 0) {
+          projectId = projects[0].id;
+        } else {
+          // Create default project
+          const { data: newProject, error: projectError } = await supabase
+            .from('projects')
+            .insert({ user_id: userId })
+            .select()
+            .single();
+          
+          if (projectError) throw projectError;
+          projectId = newProject.id;
+        }
+      }
       
-      mockAssets.set(assetId, newAsset);
-      console.log(`[assets] Created asset ${assetId} in UPLOADED state`);
+      const { data: newAsset, error } = await supabase
+        .from('assets')
+        .insert({
+          project_id: projectId,
+          user_id: userId,
+          name: body.name,
+          type: body.type,
+          url: body.url,
+          content: body.content,
+          state: 'UPLOADED',
+          platform_compatibility: body.platform_compatibility || ['GOOGLE', 'TIKTOK', 'SNAPCHAT'],
+        })
+        .select()
+        .single();
+      
+      if (error) {
+        console.error('[assets] Insert error:', error);
+        throw error;
+      }
+      
+      console.log(`[assets] Created asset ${newAsset.id} for user ${userId}`);
+
+      // Emit event
+      await supabase.from('events').insert({
+        event_id: `evt_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+        event_type: 'ASSET_UPLOADED',
+        source: 'UI',
+        entity_type: 'ASSET',
+        entity_id: newAsset.id,
+        user_id: userId,
+        new_state: 'UPLOADED',
+      });
 
       return new Response(JSON.stringify({
         ...newAsset,
-        allowedActions: getAllowedActions(newAsset.state),
+        allowedActions: getAllowedActions('UPLOADED'),
       }), {
         status: 201,
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
@@ -289,8 +271,14 @@ serve(async (req) => {
     // POST /assets/{id}/analyze - Trigger AI analysis
     if (req.method === 'POST' && pathParts.length === 3 && pathParts[2] === 'analyze') {
       const assetId = pathParts[1];
-      const asset = mockAssets.get(assetId);
       
+      const { data: asset, error: fetchError } = await supabase
+        .from('assets')
+        .select('*')
+        .eq('id', assetId)
+        .maybeSingle();
+      
+      if (fetchError) throw fetchError;
       if (!asset) {
         return new Response(JSON.stringify({ error: 'Asset not found' }), {
           status: 404,
@@ -298,51 +286,85 @@ serve(async (req) => {
         });
       }
 
-      // STATE MACHINE CHECK
-      if (!isActionAllowed(asset.state, 'ANALYZE') && !isActionAllowed(asset.state, 'RE_ANALYZE')) {
-        emitEvent('STATE_TRANSITION_BLOCKED', 'SYSTEM', assetId, {
+      const currentState = asset.state as AssetState;
+      if (!isActionAllowed(currentState, 'ANALYZE') && !isActionAllowed(currentState, 'RE_ANALYZE')) {
+        await supabase.from('events').insert({
+          event_id: `evt_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+          event_type: 'STATE_TRANSITION_BLOCKED',
+          source: 'SYSTEM',
+          entity_type: 'ASSET',
+          entity_id: assetId,
+          user_id: userId,
           action: 'ANALYZE',
-          reason: `Cannot analyze in ${asset.state} state`,
-          metadata: { currentState: asset.state },
+          reason: `Cannot analyze in ${currentState} state`,
         });
+        
         return new Response(JSON.stringify({
           error: 'INVALID_TRANSITION',
-          message: `Cannot analyze asset in ${asset.state} state`,
-          currentState: asset.state,
-          allowedActions: getAllowedActions(asset.state),
+          message: `Cannot analyze asset in ${currentState} state`,
+          currentState,
+          allowedActions: getAllowedActions(currentState),
         }), {
           status: 403,
           headers: { ...corsHeaders, 'Content-Type': 'application/json' },
         });
       }
 
-      const previousState = asset.state;
-      asset.state = 'ANALYZING';
-      asset.updatedAt = new Date().toISOString();
-      mockAssets.set(assetId, asset);
+      // Update to ANALYZING state
+      const { error: updateError } = await supabase
+        .from('assets')
+        .update({ state: 'ANALYZING' })
+        .eq('id', assetId);
       
-      emitEvent('ASSET_ANALYZING', 'SYSTEM', assetId, {
-        previousState,
-        newState: 'ANALYZING',
+      if (updateError) throw updateError;
+
+      await supabase.from('events').insert({
+        event_id: `evt_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+        event_type: 'ASSET_ANALYZING',
+        source: 'SYSTEM',
+        entity_type: 'ASSET',
+        entity_id: assetId,
+        user_id: userId,
+        previous_state: currentState,
+        new_state: 'ANALYZING',
       });
 
-      // Simulate async analysis
-      setTimeout(() => {
-        const approved = Math.random() > 0.3;
-        asset.state = approved ? 'APPROVED' : 'BLOCKED';
-        asset.riskScore = approved ? Math.floor(Math.random() * 40) : 50 + Math.floor(Math.random() * 50);
-        asset.qualityScore = 50 + Math.floor(Math.random() * 50);
-        asset.issues = approved ? [] : [{ severity: 'high', message: 'Policy violation detected' }];
-        asset.updatedAt = new Date().toISOString();
-        mockAssets.set(assetId, asset);
-        console.log(`[assets] Asset ${assetId} analysis complete: ${asset.state}`);
-      }, 2000);
+      // Simulate async analysis (in production, this would be a background job)
+      const approved = Math.random() > 0.3;
+      const riskScore = approved ? Math.floor(Math.random() * 40) : 50 + Math.floor(Math.random() * 50);
+      const qualityScore = 50 + Math.floor(Math.random() * 50);
+      const newState = approved ? 'APPROVED' : 'BLOCKED';
+      
+      // Update with analysis results (simulated delay would be handled differently in production)
+      await supabase
+        .from('assets')
+        .update({
+          state: newState,
+          risk_score: riskScore,
+          quality_score: qualityScore,
+          issues: approved ? [] : [{ severity: 'high', message: 'Policy violation detected' }],
+        })
+        .eq('id', assetId);
+
+      await supabase.from('events').insert({
+        event_id: `evt_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+        event_type: approved ? 'ASSET_APPROVED' : 'ASSET_BLOCKED',
+        source: 'AI',
+        entity_type: 'ASSET',
+        entity_id: assetId,
+        user_id: userId,
+        previous_state: 'ANALYZING',
+        new_state: newState,
+        metadata: { riskScore, qualityScore },
+      });
 
       return new Response(JSON.stringify({
         id: assetId,
-        state: 'ANALYZING',
-        allowedActions: getAllowedActions('ANALYZING'),
-        message: 'Analysis started',
+        state: newState,
+        risk_score: riskScore,
+        quality_score: qualityScore,
+        allowedActions: getAllowedActions(newState as AssetState),
+        message: 'Analysis complete',
       }), {
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       });
@@ -354,8 +376,13 @@ serve(async (req) => {
       const body = await req.json().catch(() => ({}));
       const targetPlatform = body.targetPlatform;
       
-      const asset = mockAssets.get(assetId);
+      const { data: asset, error: fetchError } = await supabase
+        .from('assets')
+        .select('*')
+        .eq('id', assetId)
+        .maybeSingle();
       
+      if (fetchError) throw fetchError;
       if (!asset) {
         return new Response(JSON.stringify({ error: 'Asset not found' }), {
           status: 404,
@@ -363,67 +390,60 @@ serve(async (req) => {
         });
       }
 
-      // STATE MACHINE CHECK
-      if (!isActionAllowed(asset.state, 'MARK_READY_FOR_LAUNCH')) {
-        emitEvent('STATE_TRANSITION_BLOCKED', 'SYSTEM', assetId, {
+      const currentState = asset.state as AssetState;
+      if (!isActionAllowed(currentState, 'MARK_READY_FOR_LAUNCH')) {
+        await supabase.from('events').insert({
+          event_id: `evt_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+          event_type: 'STATE_TRANSITION_BLOCKED',
+          source: 'SYSTEM',
+          entity_type: 'ASSET',
+          entity_id: assetId,
+          user_id: userId,
           action: 'MARK_READY_FOR_LAUNCH',
-          reason: `Action not allowed in ${asset.state} state`,
-          metadata: { currentState: asset.state },
+          reason: `Action not allowed in ${currentState} state`,
         });
+        
         return new Response(JSON.stringify({
           error: 'INVALID_TRANSITION',
-          message: `Cannot mark asset ready in ${asset.state} state. Must be APPROVED first.`,
-          currentState: asset.state,
-          allowedActions: getAllowedActions(asset.state),
+          message: `Cannot mark asset ready in ${currentState} state. Must be APPROVED first.`,
+          currentState,
+          allowedActions: getAllowedActions(currentState),
         }), {
           status: 403,
           headers: { ...corsHeaders, 'Content-Type': 'application/json' },
         });
       }
 
-      // RUN STATE GUARDS (Pure function - evaluated BEFORE side effects)
+      // RUN STATE GUARDS
       const guardResult = guardAssetReadyForLaunch(
         {
           state: asset.state,
-          riskScore: asset.riskScore,
-          platformCompatibility: asset.platformCompatibility,
+          risk_score: asset.risk_score,
+          platform_compatibility: asset.platform_compatibility,
         },
         { riskThreshold: RISK_THRESHOLD },
         targetPlatform
       );
 
       if (!guardResult.allowed) {
-        // Emit STATE_GUARD_BLOCKED event
-        emitEvent('STATE_GUARD_BLOCKED', 'SYSTEM', assetId, {
+        await supabase.from('events').insert({
+          event_id: `evt_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+          event_type: 'STATE_GUARD_BLOCKED',
+          source: 'SYSTEM',
+          entity_type: 'ASSET',
+          entity_id: assetId,
+          user_id: userId,
           action: 'MARK_READY_FOR_LAUNCH',
           reason: guardResult.reason,
-          metadata: { guardName: 'guardAssetReadyForLaunch', riskScore: asset.riskScore, targetPlatform },
+          metadata: { guardName: 'guardAssetReadyForLaunch', riskScore: asset.risk_score, targetPlatform },
         });
 
         return new Response(JSON.stringify({
           error: 'GUARD_BLOCKED',
           guardName: 'guardAssetReadyForLaunch',
           message: guardResult.reason,
-          currentState: asset.state,
-          allowedActions: getAllowedActions(asset.state),
-        }), {
-          status: 403,
-          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-        });
-      }
-
-      // TRANSITION CHECK
-      if (!canTransition(asset.state, 'READY_FOR_LAUNCH')) {
-        emitEvent('STATE_TRANSITION_BLOCKED', 'SYSTEM', assetId, {
-          action: 'MARK_READY_FOR_LAUNCH',
-          reason: `Invalid transition from ${asset.state}`,
-          metadata: { currentState: asset.state, targetState: 'READY_FOR_LAUNCH' },
-        });
-        return new Response(JSON.stringify({
-          error: 'INVALID_TRANSITION',
-          message: `Cannot transition from ${asset.state} to READY_FOR_LAUNCH`,
-          currentState: asset.state,
-          allowedActions: getAllowedActions(asset.state),
+          currentState,
+          allowedActions: getAllowedActions(currentState),
         }), {
           status: 403,
           headers: { ...corsHeaders, 'Content-Type': 'application/json' },
@@ -431,19 +451,29 @@ serve(async (req) => {
       }
 
       // All guards passed - execute transition
-      const previousState = asset.state;
-      asset.state = 'READY_FOR_LAUNCH';
-      asset.updatedAt = new Date().toISOString();
-      mockAssets.set(assetId, asset);
+      const { data: updatedAsset, error: updateError } = await supabase
+        .from('assets')
+        .update({ state: 'READY_FOR_LAUNCH' })
+        .eq('id', assetId)
+        .select()
+        .single();
       
-      emitEvent('ASSET_MARKED_READY', 'UI', assetId, {
-        previousState,
-        newState: 'READY_FOR_LAUNCH',
+      if (updateError) throw updateError;
+
+      await supabase.from('events').insert({
+        event_id: `evt_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+        event_type: 'ASSET_MARKED_READY',
+        source: 'UI',
+        entity_type: 'ASSET',
+        entity_id: assetId,
+        user_id: userId,
+        previous_state: currentState,
+        new_state: 'READY_FOR_LAUNCH',
       });
 
       return new Response(JSON.stringify({
-        ...asset,
-        allowedActions: getAllowedActions(asset.state),
+        ...updatedAsset,
+        allowedActions: getAllowedActions('READY_FOR_LAUNCH'),
       }), {
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       });
@@ -452,8 +482,14 @@ serve(async (req) => {
     // POST /assets/{id}/unmark-ready - Remove ready status
     if (req.method === 'POST' && pathParts.length === 3 && pathParts[2] === 'unmark-ready') {
       const assetId = pathParts[1];
-      const asset = mockAssets.get(assetId);
       
+      const { data: asset, error: fetchError } = await supabase
+        .from('assets')
+        .select('*')
+        .eq('id', assetId)
+        .maybeSingle();
+      
+      if (fetchError) throw fetchError;
       if (!asset) {
         return new Response(JSON.stringify({ error: 'Asset not found' }), {
           status: 404,
@@ -461,48 +497,59 @@ serve(async (req) => {
         });
       }
 
-      if (!isActionAllowed(asset.state, 'UNMARK_READY')) {
-        emitEvent('STATE_TRANSITION_BLOCKED', 'SYSTEM', assetId, {
-          action: 'UNMARK_READY',
-          reason: `Action not allowed in ${asset.state} state`,
-          metadata: { currentState: asset.state },
-        });
+      const currentState = asset.state as AssetState;
+      if (!isActionAllowed(currentState, 'UNMARK_READY')) {
         return new Response(JSON.stringify({
           error: 'INVALID_TRANSITION',
-          message: `Cannot unmark asset in ${asset.state} state`,
-          currentState: asset.state,
-          allowedActions: getAllowedActions(asset.state),
+          message: `Cannot unmark asset in ${currentState} state`,
+          currentState,
+          allowedActions: getAllowedActions(currentState),
         }), {
           status: 403,
           headers: { ...corsHeaders, 'Content-Type': 'application/json' },
         });
       }
 
-      const previousState = asset.state;
-      asset.state = 'APPROVED';
-      asset.updatedAt = new Date().toISOString();
-      mockAssets.set(assetId, asset);
+      const { data: updatedAsset, error: updateError } = await supabase
+        .from('assets')
+        .update({ state: 'APPROVED' })
+        .eq('id', assetId)
+        .select()
+        .single();
       
-      emitEvent('ASSET_UNMARKED_READY', 'UI', assetId, {
-        previousState,
-        newState: 'APPROVED',
+      if (updateError) throw updateError;
+
+      await supabase.from('events').insert({
+        event_id: `evt_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+        event_type: 'ASSET_UNMARKED_READY',
+        source: 'UI',
+        entity_type: 'ASSET',
+        entity_id: assetId,
+        user_id: userId,
+        previous_state: currentState,
+        new_state: 'APPROVED',
       });
 
       return new Response(JSON.stringify({
-        ...asset,
-        allowedActions: getAllowedActions(asset.state),
+        ...updatedAsset,
+        allowedActions: getAllowedActions('APPROVED'),
       }), {
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       });
     }
 
-    // GET /assets/events - Get all asset events (normalized schema)
-    if (req.method === 'GET' && pathParts.length === 2 && pathParts[1] === 'events') {
-      const blockedOnly = url.searchParams.get('blocked') === 'true';
-      const filtered = blockedOnly 
-        ? eventStore.filter(e => e.eventType.includes('BLOCKED'))
-        : eventStore;
-      return new Response(JSON.stringify({ events: filtered }), {
+    // DELETE /assets/{id} - Delete asset
+    if (req.method === 'DELETE' && pathParts.length === 2) {
+      const assetId = pathParts[1];
+      
+      const { error } = await supabase
+        .from('assets')
+        .delete()
+        .eq('id', assetId);
+      
+      if (error) throw error;
+
+      return new Response(JSON.stringify({ success: true }), {
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       });
     }
@@ -514,8 +561,9 @@ serve(async (req) => {
 
   } catch (error) {
     console.error('[assets] Error:', error);
-    return new Response(JSON.stringify({
-      error: error instanceof Error ? error.message : 'Internal error',
+    return new Response(JSON.stringify({ 
+      error: 'Internal server error',
+      message: error instanceof Error ? error.message : 'Unknown error',
     }), {
       status: 500,
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
