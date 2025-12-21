@@ -244,11 +244,16 @@ export interface CampaignMetrics {
   roas: number;
 }
 
+export type RuleLevel = 'ad' | 'adset' | 'campaign';
+
+export type TimeRange = 'last_1_day' | 'last_3_days' | 'last_5_days' | 'last_7_days' | 'last_14_days' | 'last_30_days';
+
 export interface AutomationRule {
   id: string;
   projectId: string;
   name: string;
   enabled: boolean;
+  level: RuleLevel;
   condition: RuleCondition;
   action: RuleAction;
   createdAt: string;
@@ -258,6 +263,7 @@ export interface RuleCondition {
   metric: 'cpc' | 'cpa' | 'ctr' | 'roas' | 'impressions' | 'spend';
   operator: 'gt' | 'lt' | 'eq' | 'gte' | 'lte';
   value: number;
+  timeRange: TimeRange;
   afterImpressions?: number;
 }
 

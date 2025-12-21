@@ -7,7 +7,7 @@ import { Switch } from '@/components/ui/switch';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useProjectStore } from '@/stores/projectStore';
 import { useToast } from '@/hooks/use-toast';
-import type { AutomationRule, RuleCondition, RuleAction } from '@/types';
+import type { AutomationRule, RuleCondition, RuleAction, RuleLevel, TimeRange } from '@/types';
 import { 
   Zap, 
   Plus, 
@@ -16,7 +16,8 @@ import {
   Activity,
   DollarSign,
   Target,
-  AlertTriangle,
+  Layers,
+  Clock,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
@@ -37,8 +38,23 @@ const operators = [
   { value: 'eq', label: 'equal to' },
 ];
 
+const timeRanges = [
+  { value: 'last_1_day', label: 'Last 1 day' },
+  { value: 'last_3_days', label: 'Last 3 days' },
+  { value: 'last_5_days', label: 'Last 5 days' },
+  { value: 'last_7_days', label: 'Last 7 days' },
+  { value: 'last_14_days', label: 'Last 14 days' },
+  { value: 'last_30_days', label: 'Last 30 days' },
+];
+
+const levels = [
+  { value: 'ad', label: 'Ad' },
+  { value: 'adset', label: 'Ad Set' },
+  { value: 'campaign', label: 'Campaign' },
+];
+
 const actions = [
-  { value: 'pause', label: 'Pause campaign' },
+  { value: 'pause', label: 'Pause' },
   { value: 'increase_budget', label: 'Increase budget by' },
   { value: 'decrease_budget', label: 'Decrease budget by' },
   { value: 'modify_creative', label: 'Modify creative' },
@@ -53,6 +69,8 @@ function RuleCard({ rule, onToggle, onDelete }: {
   const metricLabel = metrics.find(m => m.value === rule.condition.metric)?.label;
   const operatorLabel = operators.find(o => o.value === rule.condition.operator)?.label;
   const actionLabel = actions.find(a => a.value === rule.action.type)?.label;
+  const timeRangeLabel = timeRanges.find(t => t.value === rule.condition.timeRange)?.label;
+  const levelLabel = levels.find(l => l.value === rule.level)?.label;
 
   return (
     <Card className={cn(
@@ -73,7 +91,12 @@ function RuleCard({ rule, onToggle, onDelete }: {
                 )} />
               </div>
               <div>
-                <p className="font-medium text-foreground">{rule.name}</p>
+                <div className="flex items-center gap-2">
+                  <p className="font-medium text-foreground">{rule.name}</p>
+                  <span className="rounded-full bg-accent px-2 py-0.5 text-xs font-medium text-accent-foreground">
+                    {levelLabel}
+                  </span>
+                </div>
                 <p className="text-sm text-muted-foreground">
                   {rule.enabled ? 'Active' : 'Disabled'}
                 </p>
@@ -85,6 +108,10 @@ function RuleCard({ rule, onToggle, onDelete }: {
               <span className="text-sm font-medium text-primary">IF</span>
               <span className="rounded bg-muted px-2 py-1 text-sm text-foreground">
                 {metricLabel}
+              </span>
+              <span className="rounded bg-accent/50 px-2 py-1 text-sm text-foreground flex items-center gap-1">
+                <Clock className="h-3 w-3" />
+                {timeRangeLabel}
               </span>
               <span className="text-sm text-muted-foreground">{operatorLabel}</span>
               <span className="rounded bg-muted px-2 py-1 text-sm text-foreground">
@@ -101,7 +128,7 @@ function RuleCard({ rule, onToggle, onDelete }: {
               <ArrowRight className="h-4 w-4 text-muted-foreground" />
               <span className="text-sm font-medium text-success">THEN</span>
               <span className="rounded bg-success/10 px-2 py-1 text-sm text-success">
-                {actionLabel}
+                {actionLabel} {levelLabel?.toLowerCase()}
                 {rule.action.value && ` ${rule.action.value}%`}
               </span>
             </div>
@@ -128,8 +155,10 @@ export default function Rules() {
   const [isCreating, setIsCreating] = useState(false);
   const [newRule, setNewRule] = useState({
     name: '',
+    level: 'ad' as RuleLevel,
     metric: 'cpc',
     operator: 'gt',
+    timeRange: 'last_7_days' as TimeRange,
     value: '',
     afterImpressions: '',
     actionType: 'pause',
@@ -156,10 +185,12 @@ export default function Rules() {
       projectId: currentProject.id,
       name: newRule.name,
       enabled: true,
+      level: newRule.level,
       condition: {
         metric: newRule.metric as RuleCondition['metric'],
         operator: newRule.operator as RuleCondition['operator'],
         value: parseFloat(newRule.value),
+        timeRange: newRule.timeRange,
         afterImpressions: newRule.afterImpressions ? parseInt(newRule.afterImpressions) : undefined,
       },
       action: {
@@ -180,8 +211,10 @@ export default function Rules() {
     setIsCreating(false);
     setNewRule({
       name: '',
+      level: 'ad',
       metric: 'cpc',
       operator: 'gt',
+      timeRange: 'last_7_days',
       value: '',
       afterImpressions: '',
       actionType: 'pause',
@@ -215,20 +248,44 @@ export default function Rules() {
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-6">
-            <div className="space-y-2">
-              <Label htmlFor="ruleName">Rule Name</Label>
-              <Input
-                id="ruleName"
-                placeholder="High CPC Alert"
-                value={newRule.name}
-                onChange={(e) => setNewRule({ ...newRule, name: e.target.value })}
-              />
+            <div className="grid gap-4 sm:grid-cols-2">
+              <div className="space-y-2">
+                <Label htmlFor="ruleName">Rule Name</Label>
+                <Input
+                  id="ruleName"
+                  placeholder="High CPA Alert"
+                  value={newRule.name}
+                  onChange={(e) => setNewRule({ ...newRule, name: e.target.value })}
+                />
+              </div>
+
+              <div className="space-y-2">
+                <Label>Apply to Level</Label>
+                <Select
+                  value={newRule.level}
+                  onValueChange={(v) => setNewRule({ ...newRule, level: v as RuleLevel })}
+                >
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {levels.map(l => (
+                      <SelectItem key={l.value} value={l.value}>
+                        <div className="flex items-center gap-2">
+                          <Layers className="h-4 w-4" />
+                          {l.label}
+                        </div>
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
             </div>
 
             <div className="rounded-lg bg-secondary/30 p-4 space-y-4">
               <p className="text-sm font-medium text-primary">IF Condition</p>
               
-              <div className="grid gap-4 sm:grid-cols-3">
+              <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
                 <div className="space-y-2">
                   <Label>Metric</Label>
                   <Select
@@ -242,6 +299,28 @@ export default function Rules() {
                       {metrics.map(m => (
                         <SelectItem key={m.value} value={m.value}>
                           {m.label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <div className="space-y-2">
+                  <Label>Time Range</Label>
+                  <Select
+                    value={newRule.timeRange}
+                    onValueChange={(v) => setNewRule({ ...newRule, timeRange: v as TimeRange })}
+                  >
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {timeRanges.map(t => (
+                        <SelectItem key={t.value} value={t.value}>
+                          <div className="flex items-center gap-2">
+                            <Clock className="h-3 w-3" />
+                            {t.label}
+                          </div>
                         </SelectItem>
                       ))}
                     </SelectContent>
@@ -271,7 +350,7 @@ export default function Rules() {
                   <Label>Value</Label>
                   <Input
                     type="number"
-                    placeholder="0.50"
+                    placeholder="7.00"
                     value={newRule.value}
                     onChange={(e) => setNewRule({ ...newRule, value: e.target.value })}
                   />
