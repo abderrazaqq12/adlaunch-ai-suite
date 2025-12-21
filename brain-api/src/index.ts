@@ -1,6 +1,7 @@
 import { serve } from '@hono/node-server'
 import { Hono } from 'hono'
 import { logger } from 'hono/logger'
+import { timeout } from 'hono/timeout'
 import { authMiddleware } from './middleware/auth'
 import { errorHandler } from './lib/errors'
 import v1 from './routes/v1'
@@ -9,7 +10,31 @@ const app = new Hono()
 
 // Global Middleware
 app.use('*', logger())
-app.use('*', authMiddleware)
+
+// Request timeout (30 seconds)
+app.use('*', timeout(30000))
+
+// Health check endpoints (NO auth required)
+app.get('/health', (c) => {
+    return c.json({
+        status: 'ok',
+        timestamp: new Date().toISOString(),
+        uptime: process.uptime(),
+        memory: process.memoryUsage(),
+    })
+})
+
+app.get('/ready', async (c) => {
+    // TODO: Add database ping if using PostgresAdapter
+    return c.json({
+        status: 'ready',
+        timestamp: new Date().toISOString(),
+        service: 'brain-api',
+    })
+})
+
+// Auth middleware (AFTER health checks)
+app.use('/api/*', authMiddleware)
 
 // Error Handling
 app.onError(errorHandler)
@@ -20,19 +45,60 @@ app.route('/api/brain/v1', v1)
 // Export for verification/testing
 export { app }
 
-// Health Check (Public? No, covered by auth middleware for now, but usually health is public)
-// Let's exempt health check from auth if we wanted, but sticking to strict requirements: 
-// "Base path: /api/brain/v1" for required endpoints.
-// I'll add a root health check just in case, but after auth for security defaults unless specified.
-
-const port = 3000
+const port = parseInt(process.env.PORT || '3000', 10)
 
 // Only run serve if this file is the entry point
 // @ts-ignore: esrun/tsx check
-if (import.meta.url === `file://${process.argv[1]}`) {
-    console.log(`Server is running on port ${port}`)
-    serve({
+if (import.meta.url === `file://${process.argv[1]}` || process.argv[1]?.endsWith('index.ts')) {
+    console.log(`[brain-api] Starting server on port ${port}...`)
+
+    const server = serve({
         fetch: app.fetch,
         port
+    })
+
+    console.log(`[brain-api] Server is running on port ${port}`)
+
+    // Graceful shutdown on SIGTERM (Fly.io sends this on restart)
+    process.on('SIGTERM', () => {
+        console.log('[brain-api] SIGTERM received, starting graceful shutdown...')
+
+        server.close(() => {
+            console.log('[brain-api] HTTP server closed')
+            process.exit(0)
+        })
+
+        // Force exit after 30 seconds if graceful shutdown hangs
+        setTimeout(() => {
+            console.error('[brain-api] Forced shutdown after 30s timeout')
+            process.exit(1)
+        }, 30000)
+    })
+
+    // Graceful shutdown on SIGINT (Ctrl+C)
+    process.on('SIGINT', () => {
+        console.log('[brain-api] SIGINT received, starting graceful shutdown...')
+
+        server.close(() => {
+            console.log('[brain-api] HTTP server closed')
+            process.exit(0)
+        })
+
+        // Force exit after 30 seconds
+        setTimeout(() => {
+            console.error('[brain-api] Forced shutdown after 30s timeout')
+            process.exit(1)
+        }, 30000)
+    })
+
+    // Handle uncaught errors
+    process.on('uncaughtException', (error) => {
+        console.error('[brain-api] Uncaught exception:', error)
+        process.exit(1)
+    })
+
+    process.on('unhandledRejection', (reason, promise) => {
+        console.error('[brain-api] Unhandled rejection at:', promise, 'reason:', reason)
+        process.exit(1)
     })
 }
