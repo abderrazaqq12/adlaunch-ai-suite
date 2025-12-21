@@ -1,8 +1,45 @@
 export type Platform = 'google' | 'tiktok' | 'snapchat';
 
+// Re-export state machine types
+export * from '@/lib/state-machines/types';
+
+// ============================================
+// ASSET STATE MACHINE (Strict)
+// ============================================
+
+/**
+ * Asset States (Strict Order):
+ * UPLOADED → ANALYZING → APPROVED → READY_FOR_LAUNCH
+ *                    ↘ BLOCKED
+ * 
+ * UI Rules:
+ * - UPLOADED: Show "Run AI Analysis", hide Publish/Select
+ * - ANALYZING: Spinner, disable all actions
+ * - APPROVED: Show "View AI Decision", "Mark Ready for Launch"
+ * - READY_FOR_LAUNCH: Selectable in Publish, show badge
+ * - BLOCKED: Show issues, "Generate Safe Variant", "Re-analyze", NEVER selectable
+ */
+export type AssetStatus = 
+  | 'UPLOADED'          // Asset uploaded, no AI analysis yet
+  | 'ANALYZING'         // AI compliance running
+  | 'APPROVED'          // Passed AI compliance
+  | 'READY_FOR_LAUNCH'  // Approved + user confirmed ready
+  | 'BLOCKED';          // Failed compliance
+
+// ============================================
+// AD ACCOUNT STATE MACHINE
+// ============================================
+
+/**
+ * Ad Account States:
+ * DISCONNECTED → CONNECTING → CONNECTED
+ */
+export type AdAccountConnectionState = 'DISCONNECTED' | 'CONNECTING' | 'CONNECTED';
+
+// Legacy compatibility - map to new states
 export type ConnectionStatus = 'not_connected' | 'connected' | 'limited_access';
 
-// Project Pipeline Stages
+// Project Pipeline Stages (kept for backward compatibility)
 export type ProjectStage = 
   | 'SETUP'
   | 'ACCOUNTS_CONNECTED'
@@ -10,13 +47,6 @@ export type ProjectStage =
   | 'ANALYSIS_PASSED'
   | 'READY_TO_LAUNCH'
   | 'LIVE';
-
-// Asset Status System
-export type AssetStatus = 
-  | 'UPLOADED'
-  | 'ANALYZED'
-  | 'RISKY'
-  | 'APPROVED';
 
 // ============================================
 // CAMPAIGN EXECUTION READINESS

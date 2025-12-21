@@ -90,12 +90,12 @@ export function useExecutionReadiness(input: ExecutionReadinessInput): CampaignE
       });
     }
 
-    // Check for risky assets included
-    const riskyAssets = selectedAssets.filter(a => a.status === 'RISKY');
-    if (riskyAssets.length > 0) {
+    // Check for blocked assets included
+    const blockedAssets = selectedAssets.filter(a => a.status === 'BLOCKED');
+    if (blockedAssets.length > 0) {
       globalBlockers.push({
         type: 'analysis',
-        message: `${riskyAssets.length} asset(s) marked as RISKY cannot be launched`,
+        message: `${blockedAssets.length} asset(s) are BLOCKED and cannot be launched`,
         severity: 'error',
       });
     }
