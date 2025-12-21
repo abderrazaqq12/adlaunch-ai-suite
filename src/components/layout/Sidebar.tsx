@@ -30,6 +30,7 @@ const navItems = [
   { path: '/monitoring', label: 'Monitoring', icon: Activity },
   { path: '/recovery', label: 'Recovery', icon: AlertTriangle },
   { path: '/history', label: 'History', icon: History },
+  { path: '/settings', label: 'Settings', icon: Settings },
 ];
 
 export function Sidebar() {
