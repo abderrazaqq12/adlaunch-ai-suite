@@ -9,6 +9,8 @@ import { StatusBadge } from '@/components/common/StatusBadge';
 import { StatCard } from '@/components/common/StatCard';
 import { ExecutionStatusBadge } from '@/components/common/ExecutionStatusBadge';
 import { RealExecutionStatusBadge } from '@/components/common/RealExecutionStatusBadge';
+import { MonitoringStateIndicator } from '@/components/common/MonitoringStateIndicator';
+import { useMonitoringState } from '@/hooks/useMonitoringState';
 import { brainClient, BrainClientError, type OptimizeResponse, type RealExecutionStatus } from '@/lib/api';
 import { useToast } from '@/hooks/use-toast';
 import type { Platform, Campaign, AIAction, CampaignIntent } from '@/types';
@@ -280,6 +282,9 @@ function MonitoringContent() {
   const projectIntents = campaignIntents.filter(i => i.projectId === currentProject?.id);
   const projectRules = rules.filter(r => r.projectId === currentProject?.id && r.enabled);
 
+  // State Machine: Compute monitoring state
+  const monitoringState = useMonitoringState(projectCampaigns);
+
   const filteredCampaigns = activeTab === 'all'
     ? projectCampaigns
     : projectCampaigns.filter(c => c.platform === activeTab);
@@ -367,29 +372,41 @@ function MonitoringContent() {
         </Button>
       </div>
 
-      {/* Overview Stats */}
-      <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-4">
-        <StatCard
-          title="Total Spend"
-          value={`$${totalSpend.toLocaleString()}`}
-          icon={DollarSign}
-        />
-        <StatCard
-          title="Total Clicks"
-          value={totalClicks.toLocaleString()}
-          icon={MousePointerClick}
-        />
-        <StatCard
-          title="Conversions"
-          value={totalConversions.toLocaleString()}
-          icon={Target}
-        />
-        <StatCard
-          title="Avg. ROAS"
-          value={`${avgRoas.toFixed(2)}x`}
-          icon={TrendingUp}
-        />
-      </div>
+      {/* State Machine Indicator */}
+      <MonitoringStateIndicator
+        state={monitoringState.state}
+        label={monitoringState.label}
+        description={monitoringState.description}
+        activeCampaigns={monitoringState.activeCampaigns}
+        pausedCampaigns={monitoringState.pausedCampaigns}
+        stoppedCampaigns={monitoringState.stoppedCampaigns}
+      />
+
+      {/* Overview Stats - only show if state allows */}
+      {monitoringState.showMetrics && (
+        <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-4">
+          <StatCard
+            title="Total Spend"
+            value={`$${totalSpend.toLocaleString()}`}
+            icon={DollarSign}
+          />
+          <StatCard
+            title="Total Clicks"
+            value={totalClicks.toLocaleString()}
+            icon={MousePointerClick}
+          />
+          <StatCard
+            title="Conversions"
+            value={totalConversions.toLocaleString()}
+            icon={Target}
+          />
+          <StatCard
+            title="Avg. ROAS"
+            value={`${avgRoas.toFixed(2)}x`}
+            icon={TrendingUp}
+          />
+        </div>
+      )}
 
       {/* Main Content Grid */}
       <div className="grid gap-8 lg:grid-cols-3">
@@ -444,21 +461,36 @@ function MonitoringContent() {
             </CardContent>
           </Card>
 
-          {/* AI Actions Log */}
-          <Card className="border-border bg-card">
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <Bot className="h-5 w-5 text-primary" />
-                AI Actions Log
-              </CardTitle>
-              <CardDescription>
-                Recent automated decisions and optimizations.
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
-              <AIActionLog actions={aiActions} isLoading={isLoadingActions} />
-            </CardContent>
-          </Card>
+          {/* AI Actions Log - only show if state allows */}
+          {monitoringState.showAIActions && (
+            <Card className="border-border bg-card">
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <Bot className="h-5 w-5 text-primary" />
+                  AI Actions Log
+                </CardTitle>
+                <CardDescription>
+                  Recent automated decisions and optimizations.
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <AIActionLog actions={aiActions} isLoading={isLoadingActions} />
+              </CardContent>
+            </Card>
+          )}
+
+          {/* Show empty state message when AI actions are hidden */}
+          {!monitoringState.showAIActions && monitoringState.state !== 'NO_ACTIVE_CAMPAIGNS' && (
+            <Card className="border-border bg-card">
+              <CardContent className="flex flex-col items-center justify-center py-8">
+                <Bot className="h-10 w-10 text-muted-foreground mb-3" />
+                <p className="font-medium text-foreground">AI Actions Paused</p>
+                <p className="text-sm text-muted-foreground text-center mt-1">
+                  AI optimization runs only when campaigns are active.
+                </p>
+              </CardContent>
+            </Card>
+          )}
         </div>
       </div>
     </div>
