@@ -7,7 +7,7 @@ import { Switch } from '@/components/ui/switch';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useProjectStore } from '@/stores/projectStore';
 import { useToast } from '@/hooks/use-toast';
-import type { AutomationRule, RuleCondition, RuleAction, RuleLevel, TimeRange } from '@/types';
+import type { AutomationRule, RuleCondition, RuleAction, RuleLevel, TimeRange, RuleExecutionLog } from '@/types';
 import { 
   Zap, 
   Plus, 
@@ -18,8 +18,12 @@ import {
   Target,
   Layers,
   Clock,
+  History,
+  CheckCircle2,
+  XCircle,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { format } from 'date-fns';
 
 const metrics = [
   { value: 'cpc', label: 'CPC', icon: DollarSign },
@@ -57,6 +61,8 @@ const actions = [
   { value: 'pause', label: 'Pause' },
   { value: 'increase_budget', label: 'Increase budget by' },
   { value: 'decrease_budget', label: 'Decrease budget by' },
+  { value: 'increase_bid', label: 'Increase bid by' },
+  { value: 'decrease_bid', label: 'Decrease bid by' },
   { value: 'modify_creative', label: 'Modify creative' },
   { value: 'trigger_recovery', label: 'Trigger recovery engine' },
 ];
@@ -165,8 +171,9 @@ export default function Rules() {
     actionValue: '',
   });
   
-  const { rules, addRule, updateRule, removeRule, currentProject } = useProjectStore();
+  const { rules, addRule, updateRule, removeRule, currentProject, getRuleExecutionLogs } = useProjectStore();
   const { toast } = useToast();
+  const executionLogs = currentProject ? getRuleExecutionLogs(currentProject.id) : [];
 
   const projectRules = rules.filter(r => r.projectId === currentProject?.id);
 
@@ -391,7 +398,7 @@ export default function Rules() {
                   </Select>
                 </div>
 
-                {(newRule.actionType === 'increase_budget' || newRule.actionType === 'decrease_budget') && (
+                {(newRule.actionType === 'increase_budget' || newRule.actionType === 'decrease_budget' || newRule.actionType === 'increase_bid' || newRule.actionType === 'decrease_bid') && (
                   <div className="space-y-2">
                     <Label>Percentage</Label>
                     <Input
@@ -446,6 +453,75 @@ export default function Rules() {
           </CardContent>
         </Card>
       )}
+
+      {/* Execution History */}
+      <Card className="border-border bg-card">
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <History className="h-5 w-5" />
+            Execution History
+          </CardTitle>
+          <CardDescription>
+            Recent rule triggers and actions taken on your ads, ad sets, and campaigns.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          {executionLogs.length > 0 ? (
+            <div className="space-y-3">
+              {executionLogs.slice(0, 20).map((log) => {
+                const actionLabel = actions.find(a => a.value === log.action)?.label || log.action;
+                const levelLabel = levels.find(l => l.value === log.level)?.label || log.level;
+                
+                return (
+                  <div
+                    key={log.id}
+                    className={cn(
+                      "flex items-start gap-3 rounded-lg border p-3",
+                      log.success ? "border-success/20 bg-success/5" : "border-destructive/20 bg-destructive/5"
+                    )}
+                  >
+                    {log.success ? (
+                      <CheckCircle2 className="h-5 w-5 text-success mt-0.5" />
+                    ) : (
+                      <XCircle className="h-5 w-5 text-destructive mt-0.5" />
+                    )}
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="font-medium text-foreground">{log.ruleName}</span>
+                        <span className="rounded-full bg-accent px-2 py-0.5 text-xs text-accent-foreground">
+                          {levelLabel}
+                        </span>
+                      </div>
+                      <p className="text-sm text-muted-foreground mt-1">
+                        <span className="font-medium">{actionLabel}</span>
+                        {log.actionValue && ` ${log.actionValue}%`}
+                        {" on "}
+                        <span className="text-foreground">{log.targetName}</span>
+                        {" • "}
+                        {log.metricName}: {log.metricValue}
+                      </p>
+                      {log.error && (
+                        <p className="text-sm text-destructive mt-1">{log.error}</p>
+                      )}
+                    </div>
+                    <span className="text-xs text-muted-foreground whitespace-nowrap">
+                      {format(new Date(log.triggeredAt), 'MMM d, HH:mm')}
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+          ) : (
+            <div className="flex flex-col items-center justify-center py-8 text-center">
+              <History className="h-8 w-8 text-muted-foreground mb-2" />
+              <p className="text-muted-foreground">No rule executions yet</p>
+              <p className="text-sm text-muted-foreground mt-1">
+                When rules are triggered, their execution history will appear here.
+              </p>
+            </div>
+          )}
+        </CardContent>
+      </Card>
     </div>
   );
 }

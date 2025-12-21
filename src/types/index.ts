@@ -268,8 +268,25 @@ export interface RuleCondition {
 }
 
 export interface RuleAction {
-  type: 'pause' | 'increase_budget' | 'decrease_budget' | 'modify_creative' | 'trigger_recovery';
+  type: 'pause' | 'increase_budget' | 'decrease_budget' | 'increase_bid' | 'decrease_bid' | 'modify_creative' | 'trigger_recovery';
   value?: number;
+}
+
+export interface RuleExecutionLog {
+  id: string;
+  ruleId: string;
+  ruleName: string;
+  projectId: string;
+  level: RuleLevel;
+  targetId: string;
+  targetName: string;
+  action: RuleAction['type'];
+  actionValue?: number;
+  metricValue: number;
+  metricName: string;
+  triggeredAt: string;
+  success: boolean;
+  error?: string;
 }
 
 export interface AIAction {

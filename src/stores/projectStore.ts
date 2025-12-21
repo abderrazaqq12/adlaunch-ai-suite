@@ -12,6 +12,7 @@ import type {
   AssetAnalysisResult,
   CampaignIntent,
   Platform,
+  RuleExecutionLog,
 } from '@/types';
 
 interface ProjectState {
@@ -21,6 +22,7 @@ interface ProjectState {
   assets: Asset[];
   campaigns: Campaign[];
   rules: AutomationRule[];
+  ruleExecutionLogs: RuleExecutionLog[];
   campaignIntents: CampaignIntent[];
   
   // Auth actions
@@ -60,6 +62,8 @@ interface ProjectState {
   addRule: (rule: AutomationRule) => void;
   updateRule: (id: string, updates: Partial<AutomationRule>) => void;
   removeRule: (id: string) => void;
+  addRuleExecutionLog: (log: RuleExecutionLog) => void;
+  getRuleExecutionLogs: (projectId: string) => RuleExecutionLog[];
 
   // Pipeline validation helpers
   getProjectStage: (projectId: string) => ProjectStage;
@@ -105,6 +109,7 @@ export const useProjectStore = create<ProjectState>()(
       assets: [],
       campaigns: [],
       rules: [],
+      ruleExecutionLogs: [],
       campaignIntents: [],
       
       setUser: (user) => set({ user }),
@@ -297,6 +302,14 @@ export const useProjectStore = create<ProjectState>()(
       removeRule: (id) => set((state) => ({
         rules: state.rules.filter((r) => r.id !== id),
       })),
+
+      addRuleExecutionLog: (log) => set((state) => ({
+        ruleExecutionLogs: [log, ...state.ruleExecutionLogs].slice(0, 100), // Keep last 100 logs
+      })),
+
+      getRuleExecutionLogs: (projectId) => {
+        return get().ruleExecutionLogs.filter(log => log.projectId === projectId);
+      },
 
       // Pipeline validation helpers
       getProjectStage: (projectId) => {
