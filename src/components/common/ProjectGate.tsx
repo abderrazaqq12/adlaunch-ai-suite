@@ -40,19 +40,20 @@ export function useLaunchReadiness() {
   const reasons: string[] = [];
   const projectAssets = assets.filter(a => a.projectId === project.id);
 
-  // Check for approved assets
-  if (!hasApprovedAssets(project.id)) {
-    const analyzedCount = projectAssets.filter(a => a.status === 'ANALYZED' || a.status === 'APPROVED').length;
-    const riskyCount = projectAssets.filter(a => a.status === 'RISKY').length;
-    
+  // Check for ready-for-launch assets (new state machine)
+  const readyAssets = projectAssets.filter(a => a.status === 'READY_FOR_LAUNCH');
+  const approvedAssets = projectAssets.filter(a => a.status === 'APPROVED');
+  const blockedAssets = projectAssets.filter(a => a.status === 'BLOCKED');
+  
+  if (readyAssets.length === 0) {
     if (projectAssets.length === 0) {
       reasons.push('No assets uploaded');
-    } else if (analyzedCount === 0) {
-      reasons.push('No assets have been analyzed');
-    } else if (riskyCount > 0 && !hasApprovedAssets(project.id)) {
-      reasons.push('All analyzed assets are marked as risky');
+    } else if (approvedAssets.length > 0) {
+      reasons.push('Mark approved assets as "Ready for Launch"');
+    } else if (blockedAssets.length > 0 && approvedAssets.length === 0) {
+      reasons.push('All analyzed assets are blocked');
     } else {
-      reasons.push('No assets have passed analysis');
+      reasons.push('No assets have passed AI analysis');
     }
   }
 

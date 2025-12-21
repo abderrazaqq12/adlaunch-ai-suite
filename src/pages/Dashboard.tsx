@@ -30,11 +30,11 @@ export default function Dashboard() {
   const navigate = useNavigate();
   const { currentProject, assets, campaigns, rules } = useProjectStore();
   
-  // Calculate stats
+  // Calculate stats using new state machine statuses
   const projectAssets = assets.filter(a => a.projectId === currentProject?.id);
   const approvedAssets = projectAssets.filter(a => a.status === 'APPROVED').length;
-  const riskyAssets = projectAssets.filter(a => a.status === 'RISKY').length;
-  const blockedAssets = projectAssets.filter(a => a.status === 'RISKY').length; // RISKY = blocked
+  const readyAssets = projectAssets.filter(a => a.status === 'READY_FOR_LAUNCH').length;
+  const blockedAssets = projectAssets.filter(a => a.status === 'BLOCKED').length;
   const pendingAssets = projectAssets.filter(a => a.status === 'UPLOADED').length;
   
   const connectedAccounts = currentProject?.connections.length || 0;
@@ -109,12 +109,12 @@ export default function Dashboard() {
                 <p className="text-sm text-muted-foreground">Assets Approved</p>
               </div>
             </div>
-            {(riskyAssets > 0 || pendingAssets > 0) && (
+            {(blockedAssets > 0 || pendingAssets > 0) && (
               <div className="mt-3 flex gap-3 text-xs">
-                {riskyAssets > 0 && (
+                {blockedAssets > 0 && (
                   <span className="flex items-center gap-1 text-destructive">
                     <XCircle className="h-3 w-3" />
-                    {riskyAssets} blocked
+                    {blockedAssets} blocked
                   </span>
                 )}
                 {pendingAssets > 0 && (

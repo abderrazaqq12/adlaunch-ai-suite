@@ -10,7 +10,8 @@ import { useToast } from '@/hooks/use-toast';
 import { ProjectGate } from '@/components/common/ProjectGate';
 import { AssetStatusBadge } from '@/components/common/AssetStatusBadge';
 import { brainClient, BrainClientError } from '@/lib/api';
-import type { Asset } from '@/types';
+import type { Asset, AssetStatus } from '@/types';
+import { getAssetStateConfig } from '@/lib/state-machines/types';
 import type { ComplianceIssue } from '@/lib/api';
 import { 
   Upload, 
@@ -19,13 +20,13 @@ import {
   Plus, 
   Trash2, 
   Sparkles,
-  AlertCircle,
   RefreshCw,
   CheckCircle2,
   XCircle,
   Eye,
-  AlertTriangle,
+  Rocket,
   Shield,
+  Loader2,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import {
@@ -37,12 +38,24 @@ import {
 } from '@/components/ui/dialog';
 import { Progress } from '@/components/ui/progress';
 
+/**
+ * Asset Manager - State Machine Driven
+ * 
+ * States: UPLOADED → ANALYZING → APPROVED → READY_FOR_LAUNCH | BLOCKED
+ * 
+ * UI Rules per State:
+ * - UPLOADED: Show "Run AI Analysis"
+ * - ANALYZING: Spinner, disable all actions
+ * - APPROVED: Show "View AI Decision", "Mark Ready for Launch"
+ * - READY_FOR_LAUNCH: Show badge, can unmark
+ * - BLOCKED: Show issues, "Generate Safe Variant", "Re-analyze"
+ */
+
 function AssetsContent() {
   const [activeTab, setActiveTab] = useState('videos');
   const [textContent, setTextContent] = useState('');
-  const [analyzingAssets, setAnalyzingAssets] = useState<Set<string>>(new Set());
-  const [showRejectionDialog, setShowRejectionDialog] = useState(false);
-  const [selectedAssetForRejection, setSelectedAssetForRejection] = useState<Asset | null>(null);
+  const [showDecisionDialog, setShowDecisionDialog] = useState(false);
+  const [selectedAsset, setSelectedAsset] = useState<Asset | null>(null);
   const [complianceIssues, setComplianceIssues] = useState<ComplianceIssue[]>([]);
   const [isAnalyzingAll, setIsAnalyzingAll] = useState(false);
   const [analysisProgress, setAnalysisProgress] = useState(0);
@@ -53,6 +66,28 @@ function AssetsContent() {
   const projectAssets = assets.filter(a => a.projectId === currentProject?.id);
   const videoAssets = projectAssets.filter(a => a.type === 'video');
   const textAssets = projectAssets.filter(a => a.type === 'text');
+
+  // State machine: Transition asset to ANALYZING
+  const transitionToAnalyzing = (assetId: string) => {
+    updateAsset(assetId, { status: 'ANALYZING' });
+  };
+
+  // State machine: Transition based on analysis result
+  const transitionFromAnalysis = (assetId: string, passed: boolean, result: any) => {
+    if (passed) {
+      updateAsset(assetId, { 
+        status: 'APPROVED',
+        analysisResult: result,
+        rejectionReasons: [],
+      });
+    } else {
+      updateAsset(assetId, { 
+        status: 'BLOCKED',
+        analysisResult: result,
+        rejectionReasons: result.issues?.map((i: any) => i.message) || [],
+      });
+    }
+  };
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>, type: 'video' | 'image') => {
     const files = e.target.files;
@@ -66,14 +101,14 @@ function AssetsContent() {
         name: file.name,
         url: URL.createObjectURL(file),
         createdAt: new Date().toISOString(),
-        status: 'UPLOADED',
+        status: 'UPLOADED', // Initial state
       };
       addAsset(newAsset);
     });
 
     toast({
       title: 'Assets Uploaded',
-      description: `Successfully uploaded ${files.length} file(s). Run AI analysis to approve.`,
+      description: `${files.length} file(s) uploaded. Run AI analysis to proceed.`,
     });
   };
 
@@ -87,13 +122,13 @@ function AssetsContent() {
       name: textContent.substring(0, 50) + (textContent.length > 50 ? '...' : ''),
       content: textContent,
       createdAt: new Date().toISOString(),
-      status: 'UPLOADED',
+      status: 'UPLOADED', // Initial state
     };
     addAsset(newAsset);
 
     toast({
-      title: 'Text Variation Added',
-      description: 'Run AI analysis to approve for launch.',
+      title: 'Ad Copy Added',
+      description: 'Run AI analysis to check compliance.',
     });
 
     setTextContent('');
@@ -105,10 +140,10 @@ function AssetsContent() {
     const asset = assets.find(a => a.id === assetId);
     if (!asset) return;
 
-    setAnalyzingAssets(prev => new Set([...prev, assetId]));
+    // State transition: UPLOADED/BLOCKED → ANALYZING
+    transitionToAnalyzing(assetId);
 
     try {
-      // Call the Brain API compliance engine
       const result = await brainClient.analyzeAsset(currentProject.id, {
         asset: {
           id: asset.id,
@@ -119,63 +154,34 @@ function AssetsContent() {
         },
       });
 
-      if (result.approved) {
-        updateAsset(assetId, { 
-          status: 'APPROVED',
-          analysisResult: {
-            policyRiskScore: result.policyRiskScore,
-            creativeQualityScore: result.creativeQualityScore,
-            passed: true,
-            analyzedAt: result.analyzedAt,
-            issues: result.issues.map(i => ({ 
-              severity: i.severity, 
-              message: i.message, 
-              platform: 'google' as const 
-            })),
-          },
-          rejectionReasons: [],
-        });
-        toast({
-          title: 'Asset Approved',
-          description: `${asset.name} passed AI compliance check.`,
-        });
-      } else {
-        updateAsset(assetId, { 
-          status: 'RISKY',
-          rejectionReasons: result.rejectionReasons,
-          analysisResult: {
-            policyRiskScore: result.policyRiskScore,
-            creativeQualityScore: result.creativeQualityScore,
-            passed: false,
-            analyzedAt: result.analyzedAt,
-            issues: result.issues.map(i => ({ 
-              severity: i.severity, 
-              message: i.message, 
-              platform: 'google' as const 
-            })),
-          },
-        });
-        toast({
-          title: 'Asset Blocked',
-          description: `${asset.name} failed compliance check. ${result.rejectionReasons.length} issue(s) found.`,
-          variant: 'destructive',
-        });
-      }
+      // State transition: ANALYZING → APPROVED or BLOCKED
+      transitionFromAnalysis(assetId, result.approved, {
+        policyRiskScore: result.policyRiskScore,
+        creativeQualityScore: result.creativeQualityScore,
+        passed: result.approved,
+        analyzedAt: result.analyzedAt,
+        issues: result.issues.map(i => ({ 
+          severity: i.severity, 
+          message: i.message, 
+          platform: 'google' as const 
+        })),
+      });
+
+      toast({
+        title: result.approved ? 'Asset Approved' : 'Asset Blocked',
+        description: result.approved 
+          ? `${asset.name} passed AI compliance.`
+          : `${asset.name} failed. ${result.rejectionReasons.length} issue(s) found.`,
+        variant: result.approved ? 'default' : 'destructive',
+      });
     } catch (error) {
-      const message = error instanceof BrainClientError 
-        ? error.message 
-        : 'Failed to analyze asset. Please try again.';
+      // Revert to previous state on error
+      updateAsset(assetId, { status: 'UPLOADED' });
       
       toast({
         title: 'Analysis Failed',
-        description: message,
+        description: error instanceof BrainClientError ? error.message : 'Please try again.',
         variant: 'destructive',
-      });
-    } finally {
-      setAnalyzingAssets(prev => {
-        const next = new Set(prev);
-        next.delete(assetId);
-        return next;
       });
     }
   };
@@ -195,8 +201,10 @@ function AssetsContent() {
     setIsAnalyzingAll(true);
     setAnalysisProgress(0);
 
+    // Transition all to ANALYZING
+    unanalyzedAssets.forEach(a => transitionToAnalyzing(a.id));
+
     try {
-      // Call the batch analysis endpoint
       const result = await brainClient.analyzeAssetBatch(currentProject.id, {
         assets: unanalyzedAssets.map(a => ({
           id: a.id,
@@ -207,45 +215,33 @@ function AssetsContent() {
         })),
       });
 
-      // Update each asset with results
       for (let i = 0; i < result.results.length; i++) {
         const analysisResult = result.results[i];
-        const asset = unanalyzedAssets.find(a => a.id === analysisResult.assetId);
-        
-        if (asset) {
-          updateAsset(analysisResult.assetId, { 
-            status: analysisResult.approved ? 'APPROVED' : 'RISKY',
-            rejectionReasons: analysisResult.rejectionReasons,
-            analysisResult: {
-              policyRiskScore: analysisResult.policyRiskScore,
-              creativeQualityScore: analysisResult.creativeQualityScore,
-              passed: analysisResult.approved,
-              analyzedAt: analysisResult.analyzedAt,
-              issues: analysisResult.issues.map(issue => ({ 
-                severity: issue.severity, 
-                message: issue.message, 
-                platform: 'google' as const 
-              })),
-            },
-          });
-        }
-        
+        transitionFromAnalysis(analysisResult.assetId, analysisResult.approved, {
+          policyRiskScore: analysisResult.policyRiskScore,
+          creativeQualityScore: analysisResult.creativeQualityScore,
+          passed: analysisResult.approved,
+          analyzedAt: analysisResult.analyzedAt,
+          issues: analysisResult.issues.map(issue => ({ 
+            severity: issue.severity, 
+            message: issue.message, 
+            platform: 'google' as const 
+          })),
+        });
         setAnalysisProgress(((i + 1) / result.results.length) * 100);
       }
 
       toast({
         title: 'Analysis Complete',
-        description: `${result.summary.approved} approved, ${result.summary.rejected} blocked out of ${result.summary.total} assets.`,
-        variant: result.summary.rejected > 0 ? 'default' : 'default',
+        description: `${result.summary.approved} approved, ${result.summary.rejected} blocked.`,
       });
     } catch (error) {
-      const message = error instanceof BrainClientError 
-        ? error.message 
-        : 'Failed to analyze assets. Please try again.';
+      // Revert all to UPLOADED on error
+      unanalyzedAssets.forEach(a => updateAsset(a.id, { status: 'UPLOADED' }));
       
       toast({
         title: 'Batch Analysis Failed',
-        description: message,
+        description: error instanceof BrainClientError ? error.message : 'Please try again.',
         variant: 'destructive',
       });
     } finally {
@@ -254,63 +250,53 @@ function AssetsContent() {
     }
   };
 
-  const handleViewRejection = async (asset: Asset) => {
-    if (!currentProject) return;
-    
-    setSelectedAssetForRejection(asset);
-    
-    // If we have analysis result with issues, use those
-    if (asset.analysisResult?.issues && asset.analysisResult.issues.length > 0) {
+  // State transition: APPROVED → READY_FOR_LAUNCH
+  const handleMarkReadyForLaunch = (assetId: string) => {
+    updateAsset(assetId, { status: 'READY_FOR_LAUNCH' });
+    toast({
+      title: 'Asset Ready',
+      description: 'Asset is now selectable for publishing.',
+    });
+  };
+
+  // State transition: READY_FOR_LAUNCH → APPROVED
+  const handleUnmarkReady = (assetId: string) => {
+    updateAsset(assetId, { status: 'APPROVED' });
+    toast({
+      title: 'Asset Unmarked',
+      description: 'Asset removed from launch queue.',
+    });
+  };
+
+  const handleViewDecision = (asset: Asset) => {
+    setSelectedAsset(asset);
+    if (asset.analysisResult?.issues) {
       setComplianceIssues(asset.analysisResult.issues.map(i => ({
         severity: i.severity,
         category: 'policy' as const,
         message: i.message,
       })));
-    } else {
-      // Otherwise use rejection reasons as issues
-      setComplianceIssues((asset.rejectionReasons || []).map(reason => ({
+    } else if (asset.rejectionReasons) {
+      setComplianceIssues(asset.rejectionReasons.map(reason => ({
         severity: 'high' as const,
         category: 'policy' as const,
         message: reason,
       })));
+    } else {
+      setComplianceIssues([]);
     }
-    
-    setShowRejectionDialog(true);
-  };
-
-  const getSeverityColor = (severity: string) => {
-    switch (severity) {
-      case 'critical': return 'text-destructive bg-destructive/10 border-destructive/20';
-      case 'high': return 'text-destructive bg-destructive/10 border-destructive/20';
-      case 'medium': return 'text-warning bg-warning/10 border-warning/20';
-      case 'low': return 'text-muted-foreground bg-muted border-border';
-      default: return 'text-muted-foreground bg-muted border-border';
-    }
-  };
-
-  const getSeverityIcon = (severity: string) => {
-    switch (severity) {
-      case 'critical':
-      case 'high':
-        return <XCircle className="h-4 w-4" />;
-      case 'medium':
-        return <AlertTriangle className="h-4 w-4" />;
-      default:
-        return <AlertCircle className="h-4 w-4" />;
-    }
+    setShowDecisionDialog(true);
   };
 
   const renderAssetCard = (asset: Asset) => {
-    const isAnalyzing = analyzingAssets.has(asset.id);
-    const isBlocked = asset.status === 'RISKY';
-    const isApproved = asset.status === 'APPROVED';
-    const needsAnalysis = asset.status === 'UPLOADED';
+    const stateConfig = getAssetStateConfig(asset.status);
 
     return (
       <Card key={asset.id} className={cn(
         "border-border bg-card overflow-hidden transition-all",
-        isBlocked && "border-destructive/50",
-        isApproved && "border-success/50"
+        asset.status === 'BLOCKED' && "border-destructive/50",
+        asset.status === 'APPROVED' && "border-success/50",
+        asset.status === 'READY_FOR_LAUNCH' && "border-primary/50"
       )}>
         {asset.type === 'video' && (
           <div className="aspect-video bg-muted">
@@ -331,7 +317,7 @@ function AssetsContent() {
                 <AssetStatusBadge status={asset.status} size="sm" />
               </div>
               
-              {/* Analysis Scores */}
+              {/* Analysis Scores - only show if analyzed */}
               {asset.analysisResult && (
                 <div className="flex gap-3 mb-3 text-xs">
                   <div className="flex items-center gap-1">
@@ -357,36 +343,78 @@ function AssetsContent() {
                 </div>
               )}
               
-              {/* AI Analysis Controls */}
+              {/* State-Driven Actions */}
               <div className="flex flex-wrap gap-2 mt-3">
-                {needsAnalysis && (
+                {/* UPLOADED: Show Run Analysis */}
+                {stateConfig.canRunAnalysis && (
                   <Button
                     size="sm"
                     variant="outline"
                     onClick={() => handleRunAnalysis(asset.id)}
-                    disabled={isAnalyzing}
                     className="gap-1.5"
                   >
-                    {isAnalyzing ? (
-                      <>
-                        <RefreshCw className="h-3.5 w-3.5 animate-spin" />
-                        Analyzing...
-                      </>
-                    ) : (
-                      <>
-                        <Sparkles className="h-3.5 w-3.5" />
-                        Run AI Compliance
-                      </>
-                    )}
+                    <Sparkles className="h-3.5 w-3.5" />
+                    Run AI Analysis
                   </Button>
                 )}
-                
-                {isBlocked && (
+
+                {/* ANALYZING: Show spinner */}
+                {stateConfig.showSpinner && (
+                  <Badge variant="outline" className="gap-1.5 bg-blue-500/10 text-blue-500">
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                    Analyzing...
+                  </Badge>
+                )}
+
+                {/* APPROVED: Show View Decision + Mark Ready */}
+                {stateConfig.canViewDecision && asset.status === 'APPROVED' && (
                   <>
                     <Button
                       size="sm"
                       variant="outline"
-                      onClick={() => handleViewRejection(asset)}
+                      onClick={() => handleViewDecision(asset)}
+                      className="gap-1.5"
+                    >
+                      <Eye className="h-3.5 w-3.5" />
+                      View AI Decision
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="default"
+                      onClick={() => handleMarkReadyForLaunch(asset.id)}
+                      className="gap-1.5"
+                    >
+                      <Rocket className="h-3.5 w-3.5" />
+                      Mark Ready for Launch
+                    </Button>
+                  </>
+                )}
+
+                {/* READY_FOR_LAUNCH: Show badge + unmark option */}
+                {asset.status === 'READY_FOR_LAUNCH' && (
+                  <>
+                    <Badge variant="default" className="bg-primary/10 text-primary border-primary/20 gap-1">
+                      <Rocket className="h-3 w-3" />
+                      Ready for Launch
+                    </Badge>
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      onClick={() => handleUnmarkReady(asset.id)}
+                      className="gap-1.5 text-muted-foreground"
+                    >
+                      Unmark
+                    </Button>
+                  </>
+                )}
+                
+                {/* BLOCKED: Show issues + Re-analyze */}
+                {asset.status === 'BLOCKED' && (
+                  <>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => handleViewDecision(asset)}
                       className="gap-1.5 text-destructive hover:text-destructive"
                     >
                       <Eye className="h-3.5 w-3.5" />
@@ -396,20 +424,12 @@ function AssetsContent() {
                       size="sm"
                       variant="outline"
                       onClick={() => handleRunAnalysis(asset.id)}
-                      disabled={isAnalyzing}
                       className="gap-1.5"
                     >
-                      <RefreshCw className={cn("h-3.5 w-3.5", isAnalyzing && "animate-spin")} />
+                      <RefreshCw className="h-3.5 w-3.5" />
                       Re-analyze
                     </Button>
                   </>
-                )}
-
-                {isApproved && (
-                  <Badge variant="default" className="bg-success/10 text-success border-success/20 gap-1">
-                    <CheckCircle2 className="h-3 w-3" />
-                    Ready for Launch
-                  </Badge>
                 )}
               </div>
             </div>
@@ -418,6 +438,7 @@ function AssetsContent() {
               size="icon"
               className="shrink-0 text-destructive hover:text-destructive"
               onClick={() => removeAsset(asset.id)}
+              disabled={asset.status === 'ANALYZING'}
             >
               <Trash2 className="h-4 w-4" />
             </Button>
@@ -427,9 +448,12 @@ function AssetsContent() {
     );
   };
 
+  // Stats by state
   const approvedCount = projectAssets.filter(a => a.status === 'APPROVED').length;
-  const blockedCount = projectAssets.filter(a => a.status === 'RISKY').length;
+  const readyCount = projectAssets.filter(a => a.status === 'READY_FOR_LAUNCH').length;
+  const blockedCount = projectAssets.filter(a => a.status === 'BLOCKED').length;
   const pendingCount = projectAssets.filter(a => a.status === 'UPLOADED').length;
+  const analyzingCount = projectAssets.filter(a => a.status === 'ANALYZING').length;
 
   return (
     <div className="space-y-8">
@@ -438,18 +462,18 @@ function AssetsContent() {
         <div>
           <h1 className="text-3xl font-bold text-foreground">Asset Manager</h1>
           <p className="mt-1 text-muted-foreground">
-            Upload assets and let AI analyze them for platform compliance.
+            Upload assets → AI analyzes → Mark ready for launch
           </p>
         </div>
         {pendingCount > 0 && (
           <Button 
             onClick={handleAnalyzeAll} 
             className="gap-2"
-            disabled={isAnalyzingAll}
+            disabled={isAnalyzingAll || analyzingCount > 0}
           >
             {isAnalyzingAll ? (
               <>
-                <RefreshCw className="h-4 w-4 animate-spin" />
+                <Loader2 className="h-4 w-4 animate-spin" />
                 Analyzing...
               </>
             ) : (
@@ -467,7 +491,7 @@ function AssetsContent() {
         <Card className="border-primary/20 bg-primary/5">
           <CardContent className="p-4">
             <div className="flex items-center gap-3 mb-2">
-              <RefreshCw className="h-5 w-5 animate-spin text-primary" />
+              <Loader2 className="h-5 w-5 animate-spin text-primary" />
               <p className="font-medium text-foreground">AI Compliance Analysis in Progress</p>
             </div>
             <Progress value={analysisProgress} className="h-2" />
@@ -478,9 +502,20 @@ function AssetsContent() {
         </Card>
       )}
 
-      {/* Stats */}
+      {/* Stats by State */}
       {projectAssets.length > 0 && (
-        <div className="grid gap-4 sm:grid-cols-3">
+        <div className="grid gap-4 sm:grid-cols-4">
+          <Card className="border-primary/20 bg-primary/5">
+            <CardContent className="p-4 flex items-center gap-3">
+              <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-primary/10">
+                <Rocket className="h-5 w-5 text-primary" />
+              </div>
+              <div>
+                <p className="text-2xl font-bold text-primary">{readyCount}</p>
+                <p className="text-sm text-muted-foreground">Ready for Launch</p>
+              </div>
+            </CardContent>
+          </Card>
           <Card className="border-success/20 bg-success/5">
             <CardContent className="p-4 flex items-center gap-3">
               <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-success/10">
@@ -506,7 +541,7 @@ function AssetsContent() {
           <Card className="border-warning/20 bg-warning/5">
             <CardContent className="p-4 flex items-center gap-3">
               <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-warning/10">
-                <AlertCircle className="h-5 w-5 text-warning" />
+                <Upload className="h-5 w-5 text-warning" />
               </div>
               <div>
                 <p className="text-2xl font-bold text-warning">{pendingCount}</p>
@@ -531,7 +566,6 @@ function AssetsContent() {
 
         {/* Video Assets Tab */}
         <TabsContent value="videos" className="mt-6 space-y-6">
-          {/* Upload Section */}
           <Card className="border-border bg-card">
             <CardHeader>
               <CardTitle>Upload Video Ads</CardTitle>
@@ -540,7 +574,6 @@ function AssetsContent() {
               </CardDescription>
             </CardHeader>
             <CardContent>
-              {/* Upload Area */}
               <div className="relative">
                 <input
                   type="file"
@@ -562,7 +595,6 @@ function AssetsContent() {
             </CardContent>
           </Card>
 
-          {/* Asset Grid */}
           {videoAssets.length > 0 && (
             <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
               {videoAssets.map(asset => renderAssetCard(asset))}
@@ -598,175 +630,206 @@ function AssetsContent() {
             </CardContent>
           </Card>
 
-          {/* Text Assets List */}
           {textAssets.length > 0 && (
             <div className="space-y-4">
-              {textAssets.map(asset => (
-                <Card key={asset.id} className={cn(
-                  "border-border bg-card",
-                  asset.status === 'RISKY' && "border-destructive/50",
-                  asset.status === 'APPROVED' && "border-success/50"
-                )}>
-                  <CardContent className="flex items-start justify-between p-4 gap-4">
-                    <div className="flex-1">
-                      <div className="flex items-center gap-2 mb-2 flex-wrap">
-                        <AssetStatusBadge status={asset.status} size="sm" />
-                        {asset.analysisResult && (
-                          <span className="text-xs text-muted-foreground">
-                            Risk: {asset.analysisResult.policyRiskScore}% • Quality: {asset.analysisResult.creativeQualityScore}%
-                          </span>
-                        )}
-                      </div>
-                      <p className="text-foreground">{asset.content}</p>
-                      
-                      {/* AI Analysis Controls */}
-                      <div className="flex flex-wrap gap-2 mt-3">
-                        {asset.status === 'UPLOADED' && (
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            onClick={() => handleRunAnalysis(asset.id)}
-                            disabled={analyzingAssets.has(asset.id)}
-                            className="gap-1.5"
-                          >
-                            {analyzingAssets.has(asset.id) ? (
-                              <>
-                                <RefreshCw className="h-3.5 w-3.5 animate-spin" />
-                                Analyzing...
-                              </>
-                            ) : (
-                              <>
-                                <Sparkles className="h-3.5 w-3.5" />
-                                Run AI Compliance
-                              </>
-                            )}
-                          </Button>
-                        )}
+              {textAssets.map(asset => {
+                const stateConfig = getAssetStateConfig(asset.status);
+                
+                return (
+                  <Card key={asset.id} className={cn(
+                    "border-border bg-card",
+                    asset.status === 'BLOCKED' && "border-destructive/50",
+                    asset.status === 'APPROVED' && "border-success/50",
+                    asset.status === 'READY_FOR_LAUNCH' && "border-primary/50"
+                  )}>
+                    <CardContent className="flex items-start justify-between p-4 gap-4">
+                      <div className="flex-1">
+                        <div className="flex items-center gap-2 mb-2 flex-wrap">
+                          <AssetStatusBadge status={asset.status} size="sm" />
+                          {asset.analysisResult && (
+                            <span className="text-xs text-muted-foreground">
+                              Risk: {asset.analysisResult.policyRiskScore}% • Quality: {asset.analysisResult.creativeQualityScore}%
+                            </span>
+                          )}
+                        </div>
+                        <p className="text-foreground">{asset.content}</p>
                         
-                        {asset.status === 'RISKY' && (
-                          <>
-                            <Button
-                              size="sm"
-                              variant="outline"
-                              onClick={() => handleViewRejection(asset)}
-                              className="gap-1.5 text-destructive hover:text-destructive"
-                            >
-                              <Eye className="h-3.5 w-3.5" />
-                              View Issues
-                            </Button>
+                        {/* State-Driven Actions */}
+                        <div className="flex flex-wrap gap-2 mt-3">
+                          {stateConfig.canRunAnalysis && (
                             <Button
                               size="sm"
                               variant="outline"
                               onClick={() => handleRunAnalysis(asset.id)}
-                              disabled={analyzingAssets.has(asset.id)}
                               className="gap-1.5"
                             >
-                              <RefreshCw className={cn("h-3.5 w-3.5", analyzingAssets.has(asset.id) && "animate-spin")} />
-                              Re-analyze
+                              <Sparkles className="h-3.5 w-3.5" />
+                              Run AI Analysis
                             </Button>
-                          </>
-                        )}
+                          )}
 
-                        {asset.status === 'APPROVED' && (
-                          <Badge variant="default" className="bg-success/10 text-success border-success/20 gap-1">
-                            <CheckCircle2 className="h-3 w-3" />
-                            Ready for Launch
-                          </Badge>
-                        )}
+                          {stateConfig.showSpinner && (
+                            <Badge variant="outline" className="gap-1.5 bg-blue-500/10 text-blue-500">
+                              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                              Analyzing...
+                            </Badge>
+                          )}
+
+                          {asset.status === 'APPROVED' && (
+                            <>
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                onClick={() => handleViewDecision(asset)}
+                                className="gap-1.5"
+                              >
+                                <Eye className="h-3.5 w-3.5" />
+                                View AI Decision
+                              </Button>
+                              <Button
+                                size="sm"
+                                variant="default"
+                                onClick={() => handleMarkReadyForLaunch(asset.id)}
+                                className="gap-1.5"
+                              >
+                                <Rocket className="h-3.5 w-3.5" />
+                                Mark Ready
+                              </Button>
+                            </>
+                          )}
+
+                          {asset.status === 'READY_FOR_LAUNCH' && (
+                            <>
+                              <Badge variant="default" className="bg-primary/10 text-primary border-primary/20 gap-1">
+                                <Rocket className="h-3 w-3" />
+                                Ready for Launch
+                              </Badge>
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                onClick={() => handleUnmarkReady(asset.id)}
+                                className="text-muted-foreground"
+                              >
+                                Unmark
+                              </Button>
+                            </>
+                          )}
+                          
+                          {asset.status === 'BLOCKED' && (
+                            <>
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                onClick={() => handleViewDecision(asset)}
+                                className="gap-1.5 text-destructive hover:text-destructive"
+                              >
+                                <Eye className="h-3.5 w-3.5" />
+                                View Issues
+                              </Button>
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                onClick={() => handleRunAnalysis(asset.id)}
+                                className="gap-1.5"
+                              >
+                                <RefreshCw className="h-3.5 w-3.5" />
+                                Re-analyze
+                              </Button>
+                            </>
+                          )}
+                        </div>
                       </div>
-                    </div>
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="shrink-0 text-destructive hover:text-destructive"
-                      onClick={() => removeAsset(asset.id)}
-                    >
-                      <Trash2 className="h-4 w-4" />
-                    </Button>
-                  </CardContent>
-                </Card>
-              ))}
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="shrink-0 text-destructive hover:text-destructive"
+                        onClick={() => removeAsset(asset.id)}
+                        disabled={asset.status === 'ANALYZING'}
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </Button>
+                    </CardContent>
+                  </Card>
+                );
+              })}
             </div>
           )}
         </TabsContent>
       </Tabs>
 
-      {/* Rejection Dialog with Detailed Issues */}
-      <Dialog open={showRejectionDialog} onOpenChange={setShowRejectionDialog}>
+      {/* AI Decision Dialog */}
+      <Dialog open={showDecisionDialog} onOpenChange={setShowDecisionDialog}>
         <DialogContent className="max-w-lg">
           <DialogHeader>
-            <DialogTitle className="flex items-center gap-2 text-destructive">
-              <XCircle className="h-5 w-5" />
-              AI Compliance Issues
+            <DialogTitle className="flex items-center gap-2">
+              {selectedAsset?.status === 'BLOCKED' ? (
+                <XCircle className="h-5 w-5 text-destructive" />
+              ) : (
+                <CheckCircle2 className="h-5 w-5 text-success" />
+              )}
+              AI Decision
             </DialogTitle>
             <DialogDescription>
-              The following issues were detected by the AI compliance engine:
+              {selectedAsset?.status === 'BLOCKED' 
+                ? 'Issues detected by AI compliance engine:'
+                : 'Asset passed AI compliance check'}
             </DialogDescription>
           </DialogHeader>
           
-          {/* Asset Info */}
-          {selectedAssetForRejection && (
+          {selectedAsset && (
             <div className="rounded-lg border border-border bg-muted/30 p-3 mb-4">
-              <p className="font-medium text-sm text-foreground">{selectedAssetForRejection.name}</p>
-              {selectedAssetForRejection.analysisResult && (
+              <p className="font-medium text-sm text-foreground">{selectedAsset.name}</p>
+              {selectedAsset.analysisResult && (
                 <div className="flex gap-4 mt-2 text-xs text-muted-foreground">
-                  <span>Policy Risk: {selectedAssetForRejection.analysisResult.policyRiskScore}%</span>
-                  <span>Creative Quality: {selectedAssetForRejection.analysisResult.creativeQualityScore}%</span>
+                  <span>Policy Risk: {selectedAsset.analysisResult.policyRiskScore}%</span>
+                  <span>Creative Quality: {selectedAsset.analysisResult.creativeQualityScore}%</span>
                 </div>
               )}
             </div>
           )}
           
-          <div className="space-y-3 max-h-[300px] overflow-y-auto">
-            {complianceIssues.map((issue, index) => (
-              <div 
-                key={index} 
-                className={cn(
-                  "flex items-start gap-3 rounded-lg border p-3",
-                  getSeverityColor(issue.severity)
-                )}
-              >
-                <div className="shrink-0 mt-0.5">
-                  {getSeverityIcon(issue.severity)}
-                </div>
-                <div className="flex-1">
-                  <div className="flex items-center gap-2 mb-1">
-                    <Badge variant="outline" className="text-xs capitalize">
+          {complianceIssues.length > 0 ? (
+            <div className="space-y-3 max-h-[300px] overflow-y-auto">
+              {complianceIssues.map((issue, index) => (
+                <div 
+                  key={index} 
+                  className="flex items-start gap-3 rounded-lg border border-destructive/20 bg-destructive/5 p-3"
+                >
+                  <XCircle className="h-4 w-4 text-destructive shrink-0 mt-0.5" />
+                  <div className="flex-1">
+                    <Badge variant="outline" className="text-xs capitalize mb-1">
                       {issue.severity}
                     </Badge>
-                    {issue.category && (
-                      <Badge variant="secondary" className="text-xs capitalize">
-                        {issue.category}
-                      </Badge>
-                    )}
+                    <p className="text-sm font-medium">{issue.message}</p>
                   </div>
-                  <p className="text-sm font-medium">{issue.message}</p>
-                  {issue.recommendation && (
-                    <p className="text-xs text-muted-foreground mt-1">
-                      💡 {issue.recommendation}
-                    </p>
-                  )}
                 </div>
-              </div>
-            ))}
-          </div>
+              ))}
+            </div>
+          ) : (
+            <div className="flex items-center gap-3 rounded-lg border border-success/20 bg-success/5 p-4">
+              <CheckCircle2 className="h-5 w-5 text-success" />
+              <p className="text-sm text-success">No compliance issues detected</p>
+            </div>
+          )}
           
           <div className="flex justify-end gap-2 mt-4">
-            <Button variant="outline" onClick={() => setShowRejectionDialog(false)}>
+            <Button variant="outline" onClick={() => setShowDecisionDialog(false)}>
               Close
             </Button>
-            <Button 
-              onClick={() => {
-                if (selectedAssetForRejection) {
-                  handleRunAnalysis(selectedAssetForRejection.id);
-                  setShowRejectionDialog(false);
-                }
-              }}
-              className="gap-1.5"
-            >
-              <RefreshCw className="h-4 w-4" />
-              Re-analyze Asset
-            </Button>
+            {selectedAsset?.status === 'BLOCKED' && (
+              <Button 
+                onClick={() => {
+                  if (selectedAsset) {
+                    handleRunAnalysis(selectedAsset.id);
+                    setShowDecisionDialog(false);
+                  }
+                }}
+                className="gap-1.5"
+              >
+                <RefreshCw className="h-4 w-4" />
+                Re-analyze
+              </Button>
+            )}
           </div>
         </DialogContent>
       </Dialog>
