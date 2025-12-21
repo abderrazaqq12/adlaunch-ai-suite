@@ -7,10 +7,10 @@ import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Checkbox } from '@/components/ui/checkbox';
+import { Badge } from '@/components/ui/badge';
 import { useProjectStore } from '@/stores/projectStore';
 import { useToast } from '@/hooks/use-toast';
 import { ProjectGate } from '@/components/common/ProjectGate';
-import { PlatformBadge } from '@/components/common/PlatformBadge';
 import { ExecutionReadinessPanel } from '@/components/common/ExecutionReadinessPanel';
 import { ExecutionStatusBadge } from '@/components/common/ExecutionStatusBadge';
 import { LaunchConfirmationDialog } from '@/components/launch/LaunchConfirmationDialog';
@@ -42,13 +42,13 @@ import {
   FileText,
   Target,
   Settings2,
+  Languages,
+  CheckCircle2,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
-const OBJECTIVES: { value: CampaignObjective; label: string; description: string }[] = [
-  { value: 'conversion', label: 'Conversion', description: 'Drive purchases, sign-ups, or leads' },
-  { value: 'video_views', label: 'Video Views', description: 'Maximize video watch time and engagement' },
-];
+// Fixed objective - Conversion only
+const FIXED_OBJECTIVE: CampaignObjective = 'conversion';
 
 const COUNTRIES = [
   { value: 'US', label: 'United States' },
@@ -57,15 +57,37 @@ const COUNTRIES = [
   { value: 'AU', label: 'Australia' },
   { value: 'DE', label: 'Germany' },
   { value: 'FR', label: 'France' },
+  { value: 'ES', label: 'Spain' },
+  { value: 'IT', label: 'Italy' },
+  { value: 'NL', label: 'Netherlands' },
+  { value: 'JP', label: 'Japan' },
+  { value: 'KR', label: 'South Korea' },
+  { value: 'BR', label: 'Brazil' },
+  { value: 'MX', label: 'Mexico' },
+  { value: 'IN', label: 'India' },
 ];
 
-type WizardStep = 'intent' | 'platforms' | 'config' | 'preview';
+const LANGUAGES = [
+  { value: 'en', label: 'English' },
+  { value: 'es', label: 'Spanish' },
+  { value: 'fr', label: 'French' },
+  { value: 'de', label: 'German' },
+  { value: 'it', label: 'Italian' },
+  { value: 'pt', label: 'Portuguese' },
+  { value: 'ja', label: 'Japanese' },
+  { value: 'ko', label: 'Korean' },
+  { value: 'zh', label: 'Chinese' },
+  { value: 'ar', label: 'Arabic' },
+  { value: 'hi', label: 'Hindi' },
+];
+
+type WizardStep = 'assets' | 'accounts' | 'audience' | 'preview';
 
 const STEPS: { key: WizardStep; title: string; description: string }[] = [
-  { key: 'intent', title: 'Campaign Intent', description: 'Define your campaign goals' },
-  { key: 'platforms', title: 'Platforms & Accounts', description: 'Select where to launch' },
-  { key: 'config', title: 'Platform Config', description: 'Configure each platform' },
-  { key: 'preview', title: 'Review & Launch', description: 'Confirm and launch' },
+  { key: 'assets', title: 'Select Assets', description: 'Choose AI-approved assets' },
+  { key: 'accounts', title: 'Ad Accounts', description: 'Select platforms & accounts' },
+  { key: 'audience', title: 'Audience', description: 'Define targeting' },
+  { key: 'preview', title: 'Publish', description: 'Review & launch' },
 ];
 
 function StepIndicator({ currentStep, steps }: { currentStep: WizardStep; steps: typeof STEPS }) {
@@ -109,16 +131,15 @@ function LaunchContent() {
   const { toast } = useToast();
 
   // Wizard state
-  const [currentStep, setCurrentStep] = useState<WizardStep>('intent');
+  const [currentStep, setCurrentStep] = useState<WizardStep>('assets');
   const [isLaunching, setIsLaunching] = useState(false);
   const [showConfirmDialog, setShowConfirmDialog] = useState(false);
   
   // Track launched runs to prevent duplicates
   const [launchedRunIds, setLaunchedRunIds] = useState<Set<string>>(new Set());
 
-  // Campaign Intent state
+  // Campaign state - Objective is FIXED
   const [campaignName, setCampaignName] = useState('');
-  const [objective, setObjective] = useState<CampaignObjective>('conversion');
   const [selectedAssetIds, setSelectedAssetIds] = useState<string[]>([]);
   const [landingPageUrl, setLandingPageUrl] = useState('');
   const [audience, setAudience] = useState<AudienceTarget>({
@@ -126,6 +147,7 @@ function LaunchContent() {
     ageMin: 18,
     ageMax: 65,
     gender: 'all',
+    languages: ['en'],
   });
   const [dailyBudget, setDailyBudget] = useState('100');
   const [softLaunch, setSoftLaunch] = useState(true);
@@ -149,11 +171,12 @@ function LaunchContent() {
     selectedPlatforms,
     accountSelections,
     platformConfigs,
-    objective,
+    objective: FIXED_OBJECTIVE,
     landingPageUrl,
     campaignName,
   });
 
+  // ONLY show AI-approved assets
   const approvedAssets = useMemo(() => 
     assets.filter(a => a.projectId === currentProject?.id && a.status === 'APPROVED'),
     [assets, currentProject?.id]
@@ -174,7 +197,7 @@ function LaunchContent() {
     if (accounts.length === 0) {
       toast({
         title: 'No Launchable Accounts',
-        description: `No ${platform} accounts with launch permission. Connect accounts in the Connections page.`,
+        description: `No ${platform} accounts with launch permission. Connect accounts first.`,
         variant: 'destructive',
       });
       return;
@@ -222,22 +245,37 @@ function LaunchContent() {
     );
   };
 
+  const toggleCountry = (countryCode: string) => {
+    setAudience(prev => ({
+      ...prev,
+      countries: prev.countries.includes(countryCode)
+        ? prev.countries.filter(c => c !== countryCode)
+        : [...prev.countries, countryCode]
+    }));
+  };
+
+  const toggleLanguage = (langCode: string) => {
+    setAudience(prev => ({
+      ...prev,
+      languages: prev.languages.includes(langCode)
+        ? prev.languages.filter(l => l !== langCode)
+        : [...prev.languages, langCode]
+    }));
+  };
+
   const totalCampaigns = calculateTotalCampaigns(accountSelections);
 
   // Step validation
-  const canProceedFromIntent = 
+  const canProceedFromAssets = selectedAssetIds.length > 0;
+  const canProceedFromAccounts = selectedPlatforms.length > 0 && accountSelections.every(s => s.accountIds.length > 0);
+  const canProceedFromAudience = 
     campaignName.trim() !== '' && 
-    selectedAssetIds.length > 0 && 
-    landingPageUrl.trim() !== '';
-
-  const canProceedFromPlatforms = 
-    selectedPlatforms.length > 0 && 
-    accountSelections.every(s => s.accountIds.length > 0);
-
-  const canProceedFromConfig = selectedPlatforms.length > 0;
+    landingPageUrl.trim() !== '' && 
+    audience.countries.length > 0 &&
+    audience.languages.length > 0;
 
   const goNext = () => {
-    const steps: WizardStep[] = ['intent', 'platforms', 'config', 'preview'];
+    const steps: WizardStep[] = ['assets', 'accounts', 'audience', 'preview'];
     const currentIndex = steps.indexOf(currentStep);
     if (currentIndex < steps.length - 1) {
       setCurrentStep(steps[currentIndex + 1]);
@@ -245,7 +283,7 @@ function LaunchContent() {
   };
 
   const goBack = () => {
-    const steps: WizardStep[] = ['intent', 'platforms', 'config', 'preview'];
+    const steps: WizardStep[] = ['assets', 'accounts', 'audience', 'preview'];
     const currentIndex = steps.indexOf(currentStep);
     if (currentIndex > 0) {
       setCurrentStep(steps[currentIndex - 1]);
@@ -253,12 +291,7 @@ function LaunchContent() {
   };
 
   // Check if this intent would be a duplicate launch
-  const getIntentKey = () => {
-    return `${campaignName}-${selectedPlatforms.sort().join(',')}-${accountSelections.map(s => `${s.platform}:${s.accountIds.sort().join(',')}`).join('|')}`;
-  };
-  
   const isDuplicateLaunch = () => {
-    // Check if there's already a launched intent with the same config
     return campaignIntents.some(intent => 
       intent.projectId === currentProject?.id &&
       intent.status === 'launched' &&
@@ -290,12 +323,12 @@ function LaunchContent() {
     try {
       const intentId = `intent-${Date.now()}`;
       
-      // Create Campaign Intent with execution status
+      // Create Campaign Intent
       const intent: CampaignIntent = {
         id: intentId,
         projectId: currentProject.id,
         name: campaignName,
-        objective,
+        objective: FIXED_OBJECTIVE,
         assetIds: selectedAssetIds,
         landingPageUrl,
         audience,
@@ -329,13 +362,11 @@ function LaunchContent() {
       // Track this launch run to prevent duplicates
       setLaunchedRunIds(prev => new Set([...prev, launchResponse.runId]));
 
-      // Process launch results - create local campaign records based on Brain response
+      // Process launch results
       for (const platformResult of launchResponse.platformResults) {
         for (const accountResult of platformResult.accounts) {
-          // Create campaigns for all accounts to show execution status
           const isLaunched = accountResult.status === 'DECIDED_FULL' || accountResult.status === 'DECIDED_SOFT';
           const isFailed = accountResult.executionStatus === 'EXECUTION_FAILED';
-          const isBlocked = accountResult.status === 'BLOCKED' || accountResult.executionStatus === 'EXECUTION_BLOCKED';
           
           if (isLaunched || isFailed) {
             const campaign: Campaign = {
@@ -347,7 +378,7 @@ function LaunchContent() {
               accountId: accountResult.accountId,
               status: isFailed ? 'disapproved' : (accountResult.status === 'DECIDED_SOFT' ? 'pending' : 'active'),
               budget: parseFloat(dailyBudget),
-              objective,
+              objective: FIXED_OBJECTIVE,
               softLaunch: accountResult.status === 'DECIDED_SOFT',
               metrics: {
                 spend: 0,
@@ -369,41 +400,31 @@ function LaunchContent() {
         }
       }
 
-      // Update intent status to launched
+      // Update intent status
       updateCampaignIntent(intentId, { 
         status: launchResponse.status === 'failed' ? 'failed' : 'launched',
         launchedAt: new Date().toISOString(),
       });
 
-      // Show results based on launch response status
+      // Show results
       if (launchResponse.status === 'partial') {
-        const skippedDetails = launchResponse.platformResults
-          .flatMap(pr => pr.accounts.filter(a => a.status === 'BLOCKED' || a.status === 'SKIPPED'))
-          .map(a => `${a.accountName} (${a.reason || 'Blocked'})`);
-        
         toast({
           title: 'Partial Launch',
-          description: `${launchResponse.totalCampaignsLaunched} launched, ${launchResponse.totalCampaignsSkipped} skipped: ${skippedDetails.slice(0, 3).join(', ')}${skippedDetails.length > 3 ? '...' : ''}`,
-          variant: 'default',
+          description: `${launchResponse.totalCampaignsLaunched} launched, ${launchResponse.totalCampaignsSkipped} skipped.`,
         });
       } else if (launchResponse.status === 'failed') {
         toast({
           title: 'Launch Failed',
-          description: 'No campaigns could be launched. Check account permissions and try again.',
+          description: 'No campaigns could be launched. Check account permissions.',
           variant: 'destructive',
         });
         setIsLaunching(false);
         return;
       }
 
-      // Show warnings if any
-      if (launchResponse.warnings && launchResponse.warnings.length > 0) {
-        console.warn('[Launch] Warnings:', launchResponse.warnings);
-      }
-
       toast({
         title: 'Campaigns Launched!',
-        description: `${launchResponse.totalCampaignsLaunched} campaign(s) submitted for review.`,
+        description: `${launchResponse.totalCampaignsLaunched} campaign(s) submitted.`,
       });
 
       navigate('/monitoring');
@@ -421,113 +442,54 @@ function LaunchContent() {
     }
   };
 
-  // Render steps
-  const renderIntentStep = () => (
+  // Step: Select AI-Approved Assets
+  const renderAssetsStep = () => (
     <div className="space-y-6">
-      {/* Campaign Name */}
-      <Card className="border-border bg-card">
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <Target className="h-5 w-5" />
-            Campaign Details
-          </CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="space-y-2">
-            <Label htmlFor="name">Campaign Name *</Label>
-            <Input
-              id="name"
-              placeholder="Summer Sale 2024"
-              value={campaignName}
-              onChange={(e) => setCampaignName(e.target.value)}
-            />
-          </div>
-
-          <div className="space-y-2">
-            <Label>Objective *</Label>
-            <p className="text-xs text-muted-foreground mb-2">
-              Select one objective. Platform-specific names will be applied automatically.
-            </p>
-            <div className="grid gap-3 sm:grid-cols-2">
-              {OBJECTIVES.map(obj => (
-                <div
-                  key={obj.value}
-                  onClick={() => setObjective(obj.value)}
-                  className={cn(
-                    'cursor-pointer rounded-lg border p-4 transition-all',
-                    objective === obj.value
-                      ? 'border-primary bg-primary/5'
-                      : 'border-border hover:border-primary/50'
-                  )}
-                >
-                  <div className="flex items-center gap-3">
-                    <div className={cn(
-                      'flex h-10 w-10 items-center justify-center rounded-lg',
-                      objective === obj.value ? 'bg-primary text-primary-foreground' : 'bg-muted'
-                    )}>
-                      {obj.value === 'conversion' ? <Target className="h-5 w-5" /> : <Video className="h-5 w-5" />}
-                    </div>
-                    <div>
-                      <p className="font-medium">{obj.label}</p>
-                      <p className="text-xs text-muted-foreground">{obj.description}</p>
-                    </div>
-                  </div>
-                </div>
-              ))}
+      {/* Fixed Objective Display */}
+      <Card className="border-primary/20 bg-primary/5">
+        <CardContent className="p-4">
+          <div className="flex items-center gap-3">
+            <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-primary text-primary-foreground">
+              <Target className="h-5 w-5" />
             </div>
-          </div>
-
-          <div className="space-y-2">
-            <Label htmlFor="url">Landing Page URL *</Label>
-            <Input
-              id="url"
-              type="url"
-              placeholder="https://example.com/landing"
-              value={landingPageUrl}
-              onChange={(e) => setLandingPageUrl(e.target.value)}
-            />
-          </div>
-
-          <div className="space-y-2">
-            <Label htmlFor="budget">Daily Budget</Label>
-            <div className="relative">
-              <DollarSign className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-              <Input
-                id="budget"
-                type="number"
-                placeholder="100"
-                value={dailyBudget}
-                onChange={(e) => setDailyBudget(e.target.value)}
-                className="pl-10"
-              />
+            <div>
+              <p className="font-medium text-foreground">Objective: Conversion (Sales)</p>
+              <p className="text-sm text-muted-foreground">Fixed objective for all campaigns</p>
             </div>
           </div>
         </CardContent>
       </Card>
 
-      {/* Asset Selection */}
+      {/* Asset Selection - ONLY APPROVED */}
       <Card className="border-border bg-card">
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
             <Video className="h-5 w-5" />
-            Select Assets *
+            Select AI-Approved Assets
           </CardTitle>
           <CardDescription>
-            Choose approved assets for this campaign. {selectedAssetIds.length} selected.
+            Only assets that passed AI compliance can be selected. {selectedAssetIds.length} selected.
           </CardDescription>
         </CardHeader>
         <CardContent>
           {approvedAssets.length === 0 ? (
-            <div className="rounded-lg border border-destructive/20 bg-destructive/5 p-4">
+            <div className="rounded-lg border border-destructive/20 bg-destructive/5 p-6">
               <div className="flex items-center gap-3">
-                <AlertTriangle className="h-5 w-5 text-destructive" />
+                <AlertTriangle className="h-6 w-6 text-destructive" />
                 <div>
-                  <p className="font-medium text-foreground">No Approved Assets</p>
+                  <p className="font-medium text-foreground">No AI-Approved Assets</p>
                   <p className="text-sm text-muted-foreground">
-                    Run pre-launch analysis to approve assets before launching.
+                    Go to Assets page and run AI analysis to approve assets for launch.
                   </p>
                 </div>
               </div>
+              <Button 
+                variant="outline" 
+                className="mt-4"
+                onClick={() => navigate('/assets')}
+              >
+                Go to Assets
+              </Button>
             </div>
           ) : (
             <div className="space-y-2">
@@ -548,7 +510,12 @@ function LaunchContent() {
                   </div>
                   <div className="flex-1">
                     <p className="text-sm font-medium text-foreground">{asset.name}</p>
-                    <p className="text-xs text-muted-foreground capitalize">{asset.type}</p>
+                    <div className="flex items-center gap-2 mt-1">
+                      <Badge variant="default" className="bg-success/10 text-success border-success/20 text-xs gap-1">
+                        <CheckCircle2 className="h-3 w-3" />
+                        AI Approved
+                      </Badge>
+                    </div>
                   </div>
                   <Check className={cn('h-5 w-5', selectedAssetIds.includes(asset.id) ? 'text-primary' : 'text-transparent')} />
                 </div>
@@ -557,80 +524,11 @@ function LaunchContent() {
           )}
         </CardContent>
       </Card>
-
-      {/* Audience Targeting */}
-      <Card className="border-border bg-card">
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <Users className="h-5 w-5" />
-            Audience Targeting
-          </CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="space-y-2">
-            <Label>Country</Label>
-            <Select 
-              value={audience.countries[0]} 
-              onValueChange={(v) => setAudience(prev => ({ ...prev, countries: [v] }))}
-            >
-              <SelectTrigger>
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {COUNTRIES.map(c => (
-                  <SelectItem key={c.value} value={c.value}>{c.label}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-
-          <div className="grid gap-4 sm:grid-cols-2">
-            <div className="space-y-2">
-              <Label>Age Range</Label>
-              <div className="flex items-center gap-2">
-                <Input
-                  type="number"
-                  min={13}
-                  max={65}
-                  value={audience.ageMin}
-                  onChange={(e) => setAudience(prev => ({ ...prev, ageMin: parseInt(e.target.value) || 18 }))}
-                  className="w-20"
-                />
-                <span className="text-muted-foreground">to</span>
-                <Input
-                  type="number"
-                  min={13}
-                  max={65}
-                  value={audience.ageMax}
-                  onChange={(e) => setAudience(prev => ({ ...prev, ageMax: parseInt(e.target.value) || 65 }))}
-                  className="w-20"
-                />
-              </div>
-            </div>
-
-            <div className="space-y-2">
-              <Label>Gender</Label>
-              <Select 
-                value={audience.gender} 
-                onValueChange={(v) => setAudience(prev => ({ ...prev, gender: v as any }))}
-              >
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">All</SelectItem>
-                  <SelectItem value="male">Male</SelectItem>
-                  <SelectItem value="female">Female</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-          </div>
-        </CardContent>
-      </Card>
     </div>
   );
 
-  const renderPlatformsStep = () => (
+  // Step: Select Ad Accounts
+  const renderAccountsStep = () => (
     <div className="space-y-6">
       <Card className="border-border bg-card">
         <CardHeader>
@@ -639,8 +537,7 @@ function LaunchContent() {
             Select Platforms & Accounts
           </CardTitle>
           <CardDescription>
-            Choose platforms and specific ad accounts for your campaign.
-            Your "{objective === 'conversion' ? 'Conversion' : 'Video Views'}" objective will be mapped to each platform's equivalent.
+            Choose platforms and ad accounts. Multiple accounts per platform supported.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-6">
@@ -683,8 +580,7 @@ function LaunchContent() {
                         <p className="text-sm text-destructive">No accounts with launch permission</p>
                       ) : (
                         <p className="text-sm text-muted-foreground">
-                          {accounts.length} account{accounts.length !== 1 ? 's' : ''} available • 
-                          Objective: {PLATFORM_OBJECTIVE_NAMES[platform][objective]}
+                          {accounts.length} account{accounts.length !== 1 ? 's' : ''} available
                         </p>
                       )}
                     </div>
@@ -753,148 +649,174 @@ function LaunchContent() {
     </div>
   );
 
-  const renderConfigStep = () => (
+  // Step: Audience Targeting
+  const renderAudienceStep = () => (
     <div className="space-y-6">
-      {selectedPlatforms.map(platform => (
-        <Card key={platform} className="border-border bg-card">
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <Settings2 className="h-5 w-5" />
-              <span className="capitalize">{platform} Ads Configuration</span>
-            </CardTitle>
-            <CardDescription>
-              Platform-specific settings for {PLATFORM_OBJECTIVE_NAMES[platform][objective]}
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            {platform === 'google' && (
-              <>
-                <div className="space-y-2">
-                  <Label>Campaign Type</Label>
-                  <div className="rounded-lg border border-border bg-muted/30 p-3">
-                    <p className="font-medium text-foreground">Demand Gen</p>
-                    <p className="text-sm text-muted-foreground">
-                      Only Demand Gen campaigns are supported for automated launch.
-                    </p>
-                  </div>
-                </div>
-                <div className="space-y-2">
-                  <Label>Mapped Objective</Label>
-                  <p className="text-sm text-muted-foreground">
-                    Your "{objective === 'conversion' ? 'Conversion' : 'Video Views'}" objective will be launched as: <strong>{PLATFORM_OBJECTIVE_NAMES.google[objective]}</strong>
-                  </p>
-                </div>
-                {objective === 'conversion' && (
-                  <div className="space-y-2">
-                    <Label htmlFor="google-conversion">Conversion Action (Optional)</Label>
-                    <Input
-                      id="google-conversion"
-                      placeholder="e.g., Purchase, Sign Up"
-                      value={platformConfigs.google?.conversionAction || ''}
-                      onChange={(e) => setPlatformConfigs(prev => ({
-                        ...prev,
-                        google: { ...prev.google!, conversionAction: e.target.value }
-                      }))}
-                    />
-                  </div>
-                )}
-              </>
-            )}
-
-            {platform === 'tiktok' && (
-              <>
-                <div className="space-y-2">
-                  <Label>Mapped Objective</Label>
-                  <p className="text-sm text-muted-foreground">
-                    Your "{objective === 'conversion' ? 'Conversion' : 'Video Views'}" objective will be launched as: <strong>{PLATFORM_OBJECTIVE_NAMES.tiktok[objective]}</strong>
-                  </p>
-                </div>
-                {objective === 'conversion' && (
-                  <div className="space-y-2">
-                    <Label htmlFor="tiktok-event">Optimization Event (Optional)</Label>
-                    <Select 
-                      value={platformConfigs.tiktok?.optimizationEvent || ''} 
-                      onValueChange={(v) => setPlatformConfigs(prev => ({
-                        ...prev,
-                        tiktok: { ...prev.tiktok, optimizationEvent: v }
-                      }))}
-                    >
-                      <SelectTrigger>
-                        <SelectValue placeholder="Select event" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="complete_payment">Complete Payment</SelectItem>
-                        <SelectItem value="add_to_cart">Add to Cart</SelectItem>
-                        <SelectItem value="submit_form">Submit Form</SelectItem>
-                        <SelectItem value="click">Click</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
-                )}
-              </>
-            )}
-
-            {platform === 'snapchat' && (
-              <>
-                <div className="space-y-2">
-                  <Label>Mapped Objective</Label>
-                  <p className="text-sm text-muted-foreground">
-                    Your "{objective === 'conversion' ? 'Conversion' : 'Video Views'}" objective will be launched as: <strong>{PLATFORM_OBJECTIVE_NAMES.snapchat[objective]}</strong>
-                  </p>
-                </div>
-                {objective === 'conversion' && (
-                  <>
-                    <div className="space-y-2">
-                      <Label htmlFor="snap-pixel">Pixel ID (Optional)</Label>
-                      <Input
-                        id="snap-pixel"
-                        placeholder="e.g., abc123-xyz"
-                        value={platformConfigs.snapchat?.pixelId || ''}
-                        onChange={(e) => setPlatformConfigs(prev => ({
-                          ...prev,
-                          snapchat: { ...prev.snapchat, pixelId: e.target.value }
-                        }))}
-                      />
-                    </div>
-                    <div className="space-y-2">
-                      <Label htmlFor="snap-event">Conversion Event (Optional)</Label>
-                      <Select 
-                        value={platformConfigs.snapchat?.conversionEvent || ''} 
-                        onValueChange={(v) => setPlatformConfigs(prev => ({
-                          ...prev,
-                          snapchat: { ...prev.snapchat, conversionEvent: v }
-                        }))}
-                      >
-                        <SelectTrigger>
-                          <SelectValue placeholder="Select event" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="purchase">Purchase</SelectItem>
-                          <SelectItem value="add_cart">Add to Cart</SelectItem>
-                          <SelectItem value="sign_up">Sign Up</SelectItem>
-                          <SelectItem value="page_view">Page View</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </div>
-                  </>
-                )}
-              </>
-            )}
-          </CardContent>
-        </Card>
-      ))}
-
-      {/* Soft Launch Toggle */}
+      {/* Campaign Details */}
       <Card className="border-border bg-card">
-        <CardContent className="flex items-center justify-between p-6">
-          <div className="flex items-start gap-4">
-            <div className="rounded-lg bg-success/10 p-3">
-              <Shield className="h-5 w-5 text-success" />
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <Target className="h-5 w-5" />
+            Campaign Details
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="space-y-2">
+            <Label htmlFor="name">Campaign Name *</Label>
+            <Input
+              id="name"
+              placeholder="Summer Sale 2024"
+              value={campaignName}
+              onChange={(e) => setCampaignName(e.target.value)}
+            />
+          </div>
+
+          <div className="space-y-2">
+            <Label htmlFor="url">Landing Page URL *</Label>
+            <Input
+              id="url"
+              type="url"
+              placeholder="https://example.com/landing"
+              value={landingPageUrl}
+              onChange={(e) => setLandingPageUrl(e.target.value)}
+            />
+          </div>
+
+          <div className="space-y-2">
+            <Label htmlFor="budget">Daily Budget</Label>
+            <div className="relative">
+              <DollarSign className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+              <Input
+                id="budget"
+                type="number"
+                placeholder="100"
+                value={dailyBudget}
+                onChange={(e) => setDailyBudget(e.target.value)}
+                className="pl-10"
+              />
             </div>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Countries - Multi-select */}
+      <Card className="border-border bg-card">
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <Globe className="h-5 w-5" />
+            Target Countries *
+          </CardTitle>
+          <CardDescription>Select one or more countries</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div className="flex flex-wrap gap-2">
+            {COUNTRIES.map(country => (
+              <Badge
+                key={country.value}
+                variant={audience.countries.includes(country.value) ? 'default' : 'outline'}
+                className="cursor-pointer px-3 py-1.5"
+                onClick={() => toggleCountry(country.value)}
+              >
+                {country.label}
+              </Badge>
+            ))}
+          </div>
+          {audience.countries.length === 0 && (
+            <p className="text-sm text-destructive mt-2">Select at least one country</p>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* Languages - Multi-select */}
+      <Card className="border-border bg-card">
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <Languages className="h-5 w-5" />
+            Target Languages *
+          </CardTitle>
+          <CardDescription>Select one or more languages</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div className="flex flex-wrap gap-2">
+            {LANGUAGES.map(lang => (
+              <Badge
+                key={lang.value}
+                variant={audience.languages.includes(lang.value) ? 'default' : 'outline'}
+                className="cursor-pointer px-3 py-1.5"
+                onClick={() => toggleLanguage(lang.value)}
+              >
+                {lang.label}
+              </Badge>
+            ))}
+          </div>
+          {audience.languages.length === 0 && (
+            <p className="text-sm text-destructive mt-2">Select at least one language</p>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* Demographics */}
+      <Card className="border-border bg-card">
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <Users className="h-5 w-5" />
+            Demographics
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="grid gap-4 sm:grid-cols-2">
+            <div className="space-y-2">
+              <Label>Age Range</Label>
+              <div className="flex items-center gap-2">
+                <Input
+                  type="number"
+                  min={13}
+                  max={65}
+                  value={audience.ageMin}
+                  onChange={(e) => setAudience(prev => ({ ...prev, ageMin: parseInt(e.target.value) || 18 }))}
+                  className="w-20"
+                />
+                <span className="text-muted-foreground">to</span>
+                <Input
+                  type="number"
+                  min={13}
+                  max={65}
+                  value={audience.ageMax}
+                  onChange={(e) => setAudience(prev => ({ ...prev, ageMax: parseInt(e.target.value) || 65 }))}
+                  className="w-20"
+                />
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <Label>Gender</Label>
+              <Select 
+                value={audience.gender} 
+                onValueChange={(v) => setAudience(prev => ({ ...prev, gender: v as 'all' | 'male' | 'female' }))}
+              >
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All</SelectItem>
+                  <SelectItem value="male">Male</SelectItem>
+                  <SelectItem value="female">Female</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Soft Launch */}
+      <Card className="border-border bg-card">
+        <CardContent className="flex items-center justify-between p-4">
+          <div className="flex items-center gap-3">
+            <Shield className="h-5 w-5 text-primary" />
             <div>
               <p className="font-medium text-foreground">Soft Launch Mode</p>
-              <p className="mt-1 text-sm text-muted-foreground">
-                Start with low budget, narrow audience, and compliance-safe settings.
+              <p className="text-sm text-muted-foreground">
+                Start with reduced budget for testing
               </p>
             </div>
           </div>
@@ -904,6 +826,7 @@ function LaunchContent() {
     </div>
   );
 
+  // Step: Preview & Publish
   const renderPreviewStep = () => (
     <div className="space-y-6">
       {/* Campaign Summary */}
@@ -919,7 +842,7 @@ function LaunchContent() {
             </div>
             <div>
               <p className="text-sm text-muted-foreground">Objective</p>
-              <p className="font-medium text-foreground capitalize">{objective.replace('_', ' ')}</p>
+              <p className="font-medium text-foreground">Conversion (Sales)</p>
             </div>
             <div>
               <p className="text-sm text-muted-foreground">Daily Budget</p>
@@ -935,8 +858,39 @@ function LaunchContent() {
             </div>
             <div>
               <p className="text-sm text-muted-foreground">Assets</p>
-              <p className="font-medium text-foreground">{selectedAssetIds.length} selected</p>
+              <p className="font-medium text-foreground">{selectedAssetIds.length} AI-approved</p>
             </div>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Audience Summary */}
+      <Card className="border-border bg-card">
+        <CardHeader>
+          <CardTitle>Audience Targeting</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          <div>
+            <p className="text-sm text-muted-foreground mb-1">Countries</p>
+            <div className="flex flex-wrap gap-1">
+              {audience.countries.map(c => (
+                <Badge key={c} variant="secondary">{COUNTRIES.find(x => x.value === c)?.label || c}</Badge>
+              ))}
+            </div>
+          </div>
+          <div>
+            <p className="text-sm text-muted-foreground mb-1">Languages</p>
+            <div className="flex flex-wrap gap-1">
+              {audience.languages.map(l => (
+                <Badge key={l} variant="secondary">{LANGUAGES.find(x => x.value === l)?.label || l}</Badge>
+              ))}
+            </div>
+          </div>
+          <div>
+            <p className="text-sm text-muted-foreground">Demographics</p>
+            <p className="font-medium text-foreground">
+              {audience.gender === 'all' ? 'All genders' : audience.gender}, ages {audience.ageMin}-{audience.ageMax}
+            </p>
           </div>
         </CardContent>
       </Card>
@@ -970,7 +924,7 @@ function LaunchContent() {
                     </span>
                   </div>
                   <div className="space-y-2 text-sm text-muted-foreground">
-                    <p>Objective: {PLATFORM_OBJECTIVE_NAMES[selection.platform][objective]}</p>
+                    <p>Objective: {PLATFORM_OBJECTIVE_NAMES[selection.platform][FIXED_OBJECTIVE]}</p>
                     <p>Accounts:</p>
                     <ul className="ml-4 list-disc">
                       {platformAccounts.map(acc => (
@@ -1001,24 +955,24 @@ function LaunchContent() {
     <div className="mx-auto max-w-3xl space-y-6">
       {/* Header */}
       <div>
-        <h1 className="text-3xl font-bold text-foreground">Launch Configuration</h1>
+        <h1 className="text-3xl font-bold text-foreground">Publish Campaign</h1>
         <p className="mt-1 text-muted-foreground">
-          Create a Campaign Intent and launch across multiple platforms and accounts.
+          Launch AI-approved assets across your ad accounts.
         </p>
       </div>
 
       {/* Step Indicator with Execution Status */}
       <div className="flex items-center justify-between">
         <StepIndicator currentStep={currentStep} steps={STEPS} />
-        {currentStep !== 'intent' && (
+        {currentStep !== 'assets' && (
           <ExecutionStatusBadge status={executionReadiness.status} />
         )}
       </div>
 
       {/* Step Content */}
-      {currentStep === 'intent' && renderIntentStep()}
-      {currentStep === 'platforms' && renderPlatformsStep()}
-      {currentStep === 'config' && renderConfigStep()}
+      {currentStep === 'assets' && renderAssetsStep()}
+      {currentStep === 'accounts' && renderAccountsStep()}
+      {currentStep === 'audience' && renderAudienceStep()}
       {currentStep === 'preview' && renderPreviewStep()}
 
       {/* Navigation */}
@@ -1026,7 +980,7 @@ function LaunchContent() {
         <Button 
           variant="outline" 
           onClick={goBack}
-          disabled={currentStep === 'intent'}
+          disabled={currentStep === 'assets'}
         >
           <ChevronLeft className="mr-2 h-4 w-4" />
           Back
@@ -1047,13 +1001,12 @@ function LaunchContent() {
             ) : isLaunching ? (
               <>
                 <Zap className="mr-2 h-5 w-5 animate-pulse" />
-                Launching {executionReadiness.totalCampaignsReady} Campaign{executionReadiness.totalCampaignsReady !== 1 ? 's' : ''}...
+                Launching...
               </>
             ) : (
               <>
                 <Rocket className="mr-2 h-5 w-5" />
-                Launch {executionReadiness.totalCampaignsReady} Campaign{executionReadiness.totalCampaignsReady !== 1 ? 's' : ''}
-                {executionReadiness.status === 'PARTIAL_READY' && ` (${executionReadiness.totalCampaignsBlocked} skipped)`}
+                Publish {executionReadiness.totalCampaignsReady} Campaign{executionReadiness.totalCampaignsReady !== 1 ? 's' : ''}
               </>
             )}
           </Button>
@@ -1061,9 +1014,9 @@ function LaunchContent() {
           <Button 
             onClick={goNext}
             disabled={
-              (currentStep === 'intent' && !canProceedFromIntent) ||
-              (currentStep === 'platforms' && !canProceedFromPlatforms) ||
-              (currentStep === 'config' && !canProceedFromConfig)
+              (currentStep === 'assets' && !canProceedFromAssets) ||
+              (currentStep === 'accounts' && !canProceedFromAccounts) ||
+              (currentStep === 'audience' && !canProceedFromAudience)
             }
           >
             Next
@@ -1087,7 +1040,7 @@ function LaunchContent() {
 
 export default function Launch() {
   return (
-    <ProjectGate requiredStage="ANALYSIS_PASSED">
+    <ProjectGate>
       <LaunchContent />
     </ProjectGate>
   );
