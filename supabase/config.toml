@@ -2,3 +2,18 @@ project_id = "fzngibjbhrirkdbpxmii"
 
 [functions.analyze-asset]
 verify_jwt = false
+
+[functions.assets]
+verify_jwt = false
+
+[functions.ad-accounts]
+verify_jwt = false
+
+[functions.campaigns]
+verify_jwt = false
+
+[functions.automation]
+verify_jwt = false
+
+[functions.events]
+verify_jwt = false
