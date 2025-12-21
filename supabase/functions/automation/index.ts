@@ -1,5 +1,15 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { authenticateRequest, createUserClient, extractBearerToken, unauthorizedResponse } from "../_shared/auth.ts";
+import { createErrorResponse, sanitizeReason, ERROR_CODES } from "../_shared/error-sanitizer.ts";
+import { 
+  withLock, 
+  shouldProceed, 
+  createAutomationDebounceKey,
+  incrementCampaignAction,
+  incrementRuleAction,
+  incrementGlobalAction,
+  checkRuleCooldown,
+} from "../_shared/concurrency.ts";
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -7,9 +17,14 @@ const corsHeaders = {
 };
 
 /**
- * AUTOMATION SAFETY v2 + JWT Authentication
+ * AUTOMATION SAFETY v3 - Atomic Rate Limits + Concurrency Control
  * 
- * All operations require a valid JWT token and are scoped to auth.uid()
+ * Improvements:
+ * - Atomic DB counters for rate limits
+ * - Stored cooldown timestamps (no Date math)
+ * - Global action limits
+ * - Sanitized error messages
+ * - Debounce & concurrency locks
  */
 
 // ============================================================================
@@ -33,7 +48,6 @@ const ACTION_COOLDOWNS: Record<string, number> = {
 
 const BLOCKED_CAMPAIGN_STATES = ['RECOVERY', 'USER_PAUSED', 'STOPPED', 'DISAPPROVED'];
 const FORBIDDEN_AUTOMATION_ACTIONS = ['ENABLE_PAUSED_CAMPAIGN', 'RESUME_USER_PAUSED'];
-const RECOVERY_FORBIDDEN_ACTIONS = ['INCREASE_BUDGET', 'SCALE_UP', 'RESUME_CAMPAIGN'];
 
 const DATA_FLOOR = {
   MIN_MINUTES_SINCE_FIRST_SPEND: 60,
@@ -67,7 +81,7 @@ function guardKillSwitch(): SafetyGuardResult {
   if (!GLOBAL_CONFIG.automationEnabled) {
     return {
       allowed: false,
-      reason: 'Global automation kill switch is ACTIVE',
+      reason: 'Automation is currently disabled',
       skipReason: 'KILL_SWITCH_ACTIVE',
       guardName: 'guardKillSwitch',
     };
@@ -93,7 +107,7 @@ function guardDataFloor(campaign: any): SafetyGuardResult {
   
   return {
     allowed: false,
-    reason: `Insufficient data: ${Math.floor(minutesSinceFirstSpend)}/${DATA_FLOOR.MIN_MINUTES_SINCE_FIRST_SPEND} minutes, ${impressions}/${DATA_FLOOR.MIN_IMPRESSIONS} impressions`,
+    reason: 'Insufficient campaign data for automation',
     skipReason: 'INSUFFICIENT_DATA',
     guardName: 'guardDataFloor',
   };
@@ -103,7 +117,7 @@ function guardCampaignState(campaign: any): SafetyGuardResult {
   if (BLOCKED_CAMPAIGN_STATES.includes(campaign.state)) {
     return {
       allowed: false,
-      reason: `Campaign in ${campaign.state} state blocks automation`,
+      reason: 'Campaign state blocks automation',
       skipReason: campaign.state === 'RECOVERY' ? 'RECOVERY_STATE' : 'CAMPAIGN_IN_BLOCKED_STATE',
       guardName: 'guardCampaignState',
     };
@@ -112,31 +126,9 @@ function guardCampaignState(campaign: any): SafetyGuardResult {
   if (campaign.paused_by_user) {
     return {
       allowed: false,
-      reason: 'Campaign was paused by user - automation cannot modify',
+      reason: 'User-paused campaigns cannot be modified by automation',
       skipReason: 'USER_PAUSED',
       guardName: 'guardCampaignState',
-    };
-  }
-  
-  return { allowed: true };
-}
-
-function guardCooldown(rule: any, actionType: string): SafetyGuardResult {
-  if (!rule.last_triggered_at) return { allowed: true };
-  
-  const cooldownMinutes = ACTION_COOLDOWNS[actionType] || ACTION_COOLDOWNS.DEFAULT;
-  const lastTriggered = new Date(rule.last_triggered_at).getTime();
-  const cooldownMs = cooldownMinutes * 60 * 1000;
-  const cooldownEndsAt = lastTriggered + cooldownMs;
-  const now = Date.now();
-  
-  if (now < cooldownEndsAt) {
-    const remainingMins = Math.ceil((cooldownEndsAt - now) / 60000);
-    return {
-      allowed: false,
-      reason: `Action in cooldown. ${remainingMins} minute(s) remaining`,
-      skipReason: 'COOLDOWN_ACTIVE',
-      guardName: 'guardCooldown',
     };
   }
   
@@ -148,7 +140,7 @@ function guardDailyLimit(campaign: any): SafetyGuardResult {
   if (actionsToday >= GLOBAL_CONFIG.maxActionsPerCampaignPerDay) {
     return {
       allowed: false,
-      reason: `Daily action limit reached (${actionsToday}/${GLOBAL_CONFIG.maxActionsPerCampaignPerDay})`,
+      reason: 'Daily action limit reached for this campaign',
       skipReason: 'DAILY_LIMIT_EXCEEDED',
       guardName: 'guardDailyLimit',
     };
@@ -171,6 +163,14 @@ const RULE_STATE_CONFIG: Record<RuleState, { allowedActions: string[] }> = {
 
 function getAllowedActions(state: RuleState): string[] {
   return RULE_STATE_CONFIG[state]?.allowedActions || [];
+}
+
+// ============================================================================
+// HELPER: Generate event ID
+// ============================================================================
+
+function generateEventId(): string {
+  return `evt_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
 }
 
 serve(async (req) => {
@@ -255,7 +255,7 @@ serve(async (req) => {
       if (error) throw error;
 
       await supabase.from('events').insert({
-        event_id: `evt_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+        event_id: generateEventId(),
         event_type: 'AUTOMATION_RULE_CREATED',
         source: 'UI',
         entity_type: 'RULE',
@@ -301,7 +301,7 @@ serve(async (req) => {
       if (error) throw error;
 
       await supabase.from('events').insert({
-        event_id: `evt_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+        event_id: generateEventId(),
         event_type: 'AUTOMATION_RULE_ENABLED',
         source: 'UI',
         entity_type: 'RULE',
@@ -347,7 +347,7 @@ serve(async (req) => {
       if (error) throw error;
 
       await supabase.from('events').insert({
-        event_id: `evt_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+        event_id: generateEventId(),
         event_type: 'AUTOMATION_RULE_DISABLED',
         source: 'UI',
         entity_type: 'RULE',
@@ -365,170 +365,259 @@ serve(async (req) => {
       });
     }
 
-    // POST /automation/run - Evaluate and execute automation rules
+    // POST /automation/run - Evaluate and execute automation rules with locks
     if (req.method === 'POST' && pathParts.length === 2 && pathParts[1] === 'run') {
-      // Check kill switch first
-      const killSwitchResult = guardKillSwitch();
-      if (!killSwitchResult.allowed) {
-        await supabase.from('events').insert({
-          event_id: `evt_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
-          event_type: 'AUTOMATION_SKIPPED',
-          source: 'SYSTEM',
-          entity_type: 'SYSTEM',
-          entity_id: 'automation_engine',
-          user_id: userId,
-          reason: killSwitchResult.reason,
-          metadata: { skipReason: killSwitchResult.skipReason },
-        });
-
-        return new Response(JSON.stringify({
-          executed: false,
-          reason: killSwitchResult.reason,
-          skipReason: killSwitchResult.skipReason,
-        }), {
-          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-        });
-      }
-
-      // Get active rules
-      const { data: rules, error: rulesError } = await supabase
-        .from('automation_rules')
-        .select('*')
-        .eq('state', 'ACTIVE');
-
-      if (rulesError) throw rulesError;
-
-      // Get user's campaigns
-      const { data: campaigns, error: campaignsError } = await supabase
-        .from('campaigns')
-        .select('*');
-
-      if (campaignsError) throw campaignsError;
-
-      const results = [];
-      const executedCampaigns = new Set<string>();
-
-      for (const rule of (rules || [])) {
-        for (const campaign of (campaigns || [])) {
-          // Single action rule
-          if (executedCampaigns.has(campaign.id)) {
-            await supabase.from('events').insert({
-              event_id: `evt_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
-              event_type: 'AUTOMATION_SKIPPED',
-              source: 'AUTOMATION',
-              entity_type: 'RULE',
-              entity_id: rule.id,
-              user_id: userId,
-              reason: 'Single action rule - campaign already executed this cycle',
-              metadata: { campaignId: campaign.id, skipReason: 'SINGLE_ACTION_RULE' },
-            });
-            continue;
-          }
-
-          // Run all safety guards
-          const stateResult = guardCampaignState(campaign);
-          if (!stateResult.allowed) {
-            await supabase.from('events').insert({
-              event_id: `evt_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
-              event_type: 'AUTOMATION_SKIPPED',
-              source: 'AUTOMATION',
-              entity_type: 'RULE',
-              entity_id: rule.id,
-              user_id: userId,
-              reason: stateResult.reason,
-              metadata: { campaignId: campaign.id, skipReason: stateResult.skipReason },
-            });
-            continue;
-          }
-
-          const dataResult = guardDataFloor(campaign);
-          if (!dataResult.allowed) {
-            await supabase.from('events').insert({
-              event_id: `evt_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
-              event_type: 'AUTOMATION_SKIPPED',
-              source: 'AUTOMATION',
-              entity_type: 'RULE',
-              entity_id: rule.id,
-              user_id: userId,
-              reason: dataResult.reason,
-              metadata: { campaignId: campaign.id, skipReason: dataResult.skipReason },
-            });
-            continue;
-          }
-
-          const cooldownResult = guardCooldown(rule, rule.action?.type || 'DEFAULT');
-          if (!cooldownResult.allowed) {
-            await supabase.from('events').insert({
-              event_id: `evt_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
-              event_type: 'AUTOMATION_SKIPPED',
-              source: 'AUTOMATION',
-              entity_type: 'RULE',
-              entity_id: rule.id,
-              user_id: userId,
-              reason: cooldownResult.reason,
-              metadata: { campaignId: campaign.id, skipReason: cooldownResult.skipReason },
-            });
-            continue;
-          }
-
-          const dailyResult = guardDailyLimit(campaign);
-          if (!dailyResult.allowed) {
-            await supabase.from('events').insert({
-              event_id: `evt_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
-              event_type: 'AUTOMATION_SKIPPED',
-              source: 'AUTOMATION',
-              entity_type: 'RULE',
-              entity_id: rule.id,
-              user_id: userId,
-              reason: dailyResult.reason,
-              metadata: { campaignId: campaign.id, skipReason: dailyResult.skipReason },
-            });
-            continue;
-          }
-
-          // All guards passed - log as triggered (actual execution would happen here)
-          executedCampaigns.add(campaign.id);
-
-          await supabase
-            .from('automation_rules')
-            .update({ 
-              last_triggered_at: new Date().toISOString(),
-              actions_today: (rule.actions_today || 0) + 1,
-            })
-            .eq('id', rule.id);
-
-          await supabase
-            .from('campaigns')
-            .update({ actions_today: (campaign.actions_today || 0) + 1 })
-            .eq('id', campaign.id);
-
-          await supabase.from('events').insert({
-            event_id: `evt_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
-            event_type: 'AUTOMATION_TRIGGERED',
-            source: 'AUTOMATION',
-            entity_type: 'RULE',
-            entity_id: rule.id,
-            user_id: userId,
-            action: rule.action?.type,
-            metadata: { campaignId: campaign.id, ruleName: rule.name },
-          });
-
-          results.push({
-            ruleId: rule.id,
-            ruleName: rule.name,
-            campaignId: campaign.id,
-            action: rule.action?.type,
-            executed: true,
+      // Get project ID from request body or find default
+      const body = await req.json().catch(() => ({}));
+      let projectId = body.project_id;
+      
+      if (!projectId) {
+        const { data: projects } = await supabase.from('projects').select('id').limit(1);
+        if (projects && projects.length > 0) {
+          projectId = projects[0].id;
+        } else {
+          return new Response(JSON.stringify({
+            executed: false,
+            reason: 'No project found',
+          }), {
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' },
           });
         }
       }
 
-      return new Response(JSON.stringify({
-        success: true,
-        rulesEvaluated: rules?.length || 0,
-        actionsExecuted: results.length,
-        results,
-      }), {
+      // DEBOUNCE CHECK
+      const debounceKey = createAutomationDebounceKey(projectId);
+      if (!shouldProceed(debounceKey)) {
+        return new Response(JSON.stringify({
+          executed: false,
+          reason: 'Request debounced - please wait before retrying',
+          retryable: true,
+          retryAfterSeconds: 2,
+        }), {
+          status: 429,
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        });
+      }
+
+      // EXECUTE WITH LOCK
+      const lockResult = await withLock(
+        supabase,
+        projectId,
+        'automation_run',
+        async () => {
+          // Check kill switch first
+          const killSwitchResult = guardKillSwitch();
+          if (!killSwitchResult.allowed) {
+            await supabase.from('events').insert({
+              event_id: generateEventId(),
+              event_type: 'AUTOMATION_SKIPPED',
+              source: 'SYSTEM',
+              entity_type: 'SYSTEM',
+              entity_id: 'automation_engine',
+              user_id: userId,
+              reason: sanitizeReason(killSwitchResult.reason || ''),
+              metadata: { skipReason: killSwitchResult.skipReason },
+            });
+
+            return {
+              executed: false,
+              reason: sanitizeReason(killSwitchResult.reason || ''),
+              skipReason: killSwitchResult.skipReason,
+            };
+          }
+
+          // CHECK GLOBAL ACTION LIMIT
+          const globalResult = await incrementGlobalAction(supabase, projectId, userId);
+          if (!globalResult.success) {
+            return {
+              executed: false,
+              reason: 'Global action limit reached',
+              skipReason: 'GLOBAL_LIMIT_EXCEEDED',
+            };
+          }
+
+          // Get active rules
+          const { data: rules, error: rulesError } = await supabase
+            .from('automation_rules')
+            .select('*')
+            .eq('state', 'ACTIVE')
+            .eq('project_id', projectId);
+
+          if (rulesError) throw rulesError;
+
+          // Get user's campaigns
+          const { data: campaigns, error: campaignsError } = await supabase
+            .from('campaigns')
+            .select('*')
+            .eq('project_id', projectId);
+
+          if (campaignsError) throw campaignsError;
+
+          const results = [];
+          const executedCampaigns = new Set<string>();
+
+          for (const rule of (rules || [])) {
+            // CHECK RULE COOLDOWN using stored timestamp
+            const cooldownCheck = await checkRuleCooldown(supabase, rule.id);
+            if (cooldownCheck.inCooldown) {
+              await supabase.from('events').insert({
+                event_id: generateEventId(),
+                event_type: 'AUTOMATION_SKIPPED',
+                source: 'AUTOMATION',
+                entity_type: 'RULE',
+                entity_id: rule.id,
+                user_id: userId,
+                reason: `Rule in cooldown (${cooldownCheck.remainingSeconds}s remaining)`,
+                metadata: { 
+                  skipReason: 'COOLDOWN_ACTIVE',
+                  cooldownEndsAt: cooldownCheck.cooldownEndsAt,
+                },
+              });
+              continue;
+            }
+
+            for (const campaign of (campaigns || [])) {
+              // Single action rule
+              if (executedCampaigns.has(campaign.id)) {
+                continue;
+              }
+
+              // Run all safety guards
+              const stateResult = guardCampaignState(campaign);
+              if (!stateResult.allowed) {
+                await supabase.from('events').insert({
+                  event_id: generateEventId(),
+                  event_type: 'AUTOMATION_SKIPPED',
+                  source: 'AUTOMATION',
+                  entity_type: 'RULE',
+                  entity_id: rule.id,
+                  user_id: userId,
+                  reason: sanitizeReason(stateResult.reason || ''),
+                  metadata: { campaignId: campaign.id, skipReason: stateResult.skipReason },
+                });
+                continue;
+              }
+
+              const dataResult = guardDataFloor(campaign);
+              if (!dataResult.allowed) {
+                await supabase.from('events').insert({
+                  event_id: generateEventId(),
+                  event_type: 'AUTOMATION_SKIPPED',
+                  source: 'AUTOMATION',
+                  entity_type: 'RULE',
+                  entity_id: rule.id,
+                  user_id: userId,
+                  reason: sanitizeReason(dataResult.reason || ''),
+                  metadata: { campaignId: campaign.id, skipReason: dataResult.skipReason },
+                });
+                continue;
+              }
+
+              const dailyResult = guardDailyLimit(campaign);
+              if (!dailyResult.allowed) {
+                await supabase.from('events').insert({
+                  event_id: generateEventId(),
+                  event_type: 'AUTOMATION_SKIPPED',
+                  source: 'AUTOMATION',
+                  entity_type: 'RULE',
+                  entity_id: rule.id,
+                  user_id: userId,
+                  reason: sanitizeReason(dailyResult.reason || ''),
+                  metadata: { campaignId: campaign.id, skipReason: dailyResult.skipReason },
+                });
+                continue;
+              }
+
+              // ATOMIC INCREMENT: Campaign action counter
+              const actionType = rule.action?.type || 'DEFAULT';
+              const cooldownMinutes = ACTION_COOLDOWNS[actionType] || ACTION_COOLDOWNS.DEFAULT;
+              
+              const campaignIncrement = await incrementCampaignAction(
+                supabase, 
+                campaign.id, 
+                cooldownMinutes
+              );
+              
+              if (!campaignIncrement.success) {
+                await supabase.from('events').insert({
+                  event_id: generateEventId(),
+                  event_type: 'AUTOMATION_SKIPPED',
+                  source: 'AUTOMATION',
+                  entity_type: 'RULE',
+                  entity_id: rule.id,
+                  user_id: userId,
+                  reason: 'Campaign action limit reached',
+                  metadata: { 
+                    campaignId: campaign.id, 
+                    skipReason: 'DAILY_LIMIT_EXCEEDED',
+                    actionsToday: campaignIncrement.newActionsToday,
+                  },
+                });
+                continue;
+              }
+
+              // ATOMIC INCREMENT: Rule action counter with cooldown timestamp
+              const ruleIncrement = await incrementRuleAction(supabase, rule.id, cooldownMinutes);
+              if (!ruleIncrement.success) {
+                // Rollback campaign increment would require a decrement function
+                // For now, log and continue
+                console.warn(`[automation] Rule increment failed for ${rule.id}: ${ruleIncrement.error}`);
+                continue;
+              }
+
+              // Mark campaign as executed this cycle
+              executedCampaigns.add(campaign.id);
+
+              await supabase.from('events').insert({
+                event_id: generateEventId(),
+                event_type: 'AUTOMATION_TRIGGERED',
+                source: 'AUTOMATION',
+                entity_type: 'RULE',
+                entity_id: rule.id,
+                user_id: userId,
+                action: actionType,
+                metadata: { 
+                  campaignId: campaign.id, 
+                  ruleName: rule.name,
+                  cooldownEndsAt: ruleIncrement.cooldownEndsAt,
+                  actionsToday: ruleIncrement.newActionsToday,
+                },
+              });
+
+              results.push({
+                ruleId: rule.id,
+                ruleName: rule.name,
+                campaignId: campaign.id,
+                action: actionType,
+                executed: true,
+                cooldownEndsAt: ruleIncrement.cooldownEndsAt,
+              });
+            }
+          }
+
+          return {
+            success: true,
+            rulesEvaluated: rules?.length || 0,
+            actionsExecuted: results.length,
+            results,
+          };
+        },
+        30 // Lock TTL: 30 seconds
+      );
+
+      if (!lockResult.success) {
+        return new Response(JSON.stringify({
+          executed: false,
+          reason: 'Another automation run is in progress',
+          retryable: true,
+          retryAfterSeconds: 5,
+        }), {
+          status: 429,
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        });
+      }
+
+      return new Response(JSON.stringify(lockResult.result), {
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       });
     }
@@ -569,12 +658,6 @@ serve(async (req) => {
 
   } catch (error) {
     console.error('[automation] Error:', error);
-    return new Response(JSON.stringify({ 
-      error: 'Internal server error',
-      message: error instanceof Error ? error.message : 'Unknown error',
-    }), {
-      status: 500,
-      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-    });
+    return createErrorResponse(error, corsHeaders);
   }
 });

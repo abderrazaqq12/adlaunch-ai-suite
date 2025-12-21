@@ -129,6 +129,33 @@ export type Database = {
           },
         ]
       }
+      automation_locks: {
+        Row: {
+          acquired_at: string
+          expires_at: string
+          holder_id: string
+          id: string
+          lock_key: string
+          project_id: string
+        }
+        Insert: {
+          acquired_at?: string
+          expires_at: string
+          holder_id: string
+          id?: string
+          lock_key: string
+          project_id: string
+        }
+        Update: {
+          acquired_at?: string
+          expires_at?: string
+          holder_id?: string
+          id?: string
+          lock_key?: string
+          project_id?: string
+        }
+        Relationships: []
+      }
       automation_rules: {
         Row: {
           action: Json
@@ -395,6 +422,42 @@ export type Database = {
         }
         Relationships: []
       }
+      global_action_limits: {
+        Row: {
+          actions_reset_at: string
+          actions_today: number
+          created_at: string
+          id: string
+          max_actions_per_account_per_day: number
+          max_actions_per_day: number
+          project_id: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          actions_reset_at?: string
+          actions_today?: number
+          created_at?: string
+          id?: string
+          max_actions_per_account_per_day?: number
+          max_actions_per_day?: number
+          project_id: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          actions_reset_at?: string
+          actions_today?: number
+          created_at?: string
+          id?: string
+          max_actions_per_account_per_day?: number
+          max_actions_per_day?: number
+          project_id?: string
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       profiles: {
         Row: {
           created_at: string
@@ -463,7 +526,58 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
-      [_ in never]: never
+      acquire_automation_lock: {
+        Args: {
+          p_holder_id: string
+          p_lock_key: string
+          p_project_id: string
+          p_ttl_seconds?: number
+        }
+        Returns: {
+          acquired: boolean
+          expires_at: string
+          holder_id: string
+        }[]
+      }
+      check_rule_cooldown: {
+        Args: { p_rule_id: string }
+        Returns: {
+          cooldown_ends_at: string
+          in_cooldown: boolean
+          remaining_seconds: number
+        }[]
+      }
+      increment_campaign_action: {
+        Args: { p_campaign_id: string; p_cooldown_minutes?: number }
+        Returns: {
+          cooldown_ends_at: string
+          error_message: string
+          new_actions_today: number
+          success: boolean
+        }[]
+      }
+      increment_global_action: {
+        Args: { p_project_id: string; p_user_id: string }
+        Returns: {
+          actions_reset_at: string
+          error_message: string
+          new_actions_today: number
+          success: boolean
+        }[]
+      }
+      increment_rule_action: {
+        Args: { p_cooldown_minutes?: number; p_rule_id: string }
+        Returns: {
+          cooldown_ends_at: string
+          error_message: string
+          new_actions_today: number
+          success: boolean
+        }[]
+      }
+      release_automation_lock: {
+        Args: { p_holder_id: string; p_lock_key: string; p_project_id: string }
+        Returns: boolean
+      }
     }
     Enums: {
       [_ in never]: never
