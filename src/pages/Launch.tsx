@@ -8,6 +8,7 @@ import { Switch } from '@/components/ui/switch';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Badge } from '@/components/ui/badge';
+import { Alert, AlertDescription } from '@/components/ui/alert';
 import { useProjectStore } from '@/stores/projectStore';
 import { useToast } from '@/hooks/use-toast';
 import { ProjectGate } from '@/components/common/ProjectGate';
@@ -15,6 +16,7 @@ import { ExecutionReadinessPanel } from '@/components/common/ExecutionReadinessP
 import { ExecutionStatusBadge } from '@/components/common/ExecutionStatusBadge';
 import { LaunchConfirmationDialog } from '@/components/launch/LaunchConfirmationDialog';
 import { useExecutionReadiness } from '@/hooks/useExecutionReadiness';
+import { usePublishFlowState, canTransitionStep } from '@/hooks/usePublishFlowState';
 import { brainClient, BrainClientError } from '@/lib/api';
 import { MultiSelectCombobox } from '@/components/ui/multi-select-combobox';
 import { COUNTRIES } from '@/lib/data/countries';
@@ -44,9 +46,10 @@ import {
   Video,
   FileText,
   Target,
-  Settings2,
   Languages,
   CheckCircle2,
+  Lock,
+  AlertCircle,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
@@ -62,37 +65,68 @@ const STEPS: { key: WizardStep; title: string; description: string }[] = [
   { key: 'preview', title: 'Publish', description: 'Review & launch' },
 ];
 
-function StepIndicator({ currentStep, steps }: { currentStep: WizardStep; steps: typeof STEPS }) {
+interface StepIndicatorProps {
+  currentStep: WizardStep;
+  steps: typeof STEPS;
+  validation: ReturnType<typeof usePublishFlowState>;
+}
+
+function StepIndicator({ currentStep, steps, validation }: StepIndicatorProps) {
   const currentIndex = steps.findIndex(s => s.key === currentStep);
+  
+  // Determine which steps are complete based on state machine
+  const getStepStatus = (index: number): 'complete' | 'current' | 'blocked' | 'upcoming' => {
+    if (index < currentIndex) return 'complete';
+    if (index === currentIndex) {
+      // Check if current step has blockers
+      if (validation.blockerMessage && !validation.canProceed) return 'blocked';
+      return 'current';
+    }
+    return 'upcoming';
+  };
   
   return (
     <div className="flex items-center gap-2 mb-8">
-      {steps.map((step, index) => (
-        <div key={step.key} className="flex items-center gap-2">
-          <div className={cn(
-            'flex h-8 w-8 items-center justify-center rounded-full text-sm font-medium transition-colors',
-            index < currentIndex ? 'bg-success text-success-foreground' :
-            index === currentIndex ? 'bg-primary text-primary-foreground' :
-            'bg-muted text-muted-foreground'
-          )}>
-            {index < currentIndex ? <Check className="h-4 w-4" /> : index + 1}
-          </div>
-          <div className="hidden sm:block">
-            <p className={cn(
-              'text-sm font-medium',
-              index <= currentIndex ? 'text-foreground' : 'text-muted-foreground'
-            )}>
-              {step.title}
-            </p>
-          </div>
-          {index < steps.length - 1 && (
+      {steps.map((step, index) => {
+        const status = getStepStatus(index);
+        
+        return (
+          <div key={step.key} className="flex items-center gap-2">
             <div className={cn(
-              'h-px w-8 mx-2',
-              index < currentIndex ? 'bg-success' : 'bg-border'
-            )} />
-          )}
-        </div>
-      ))}
+              'flex h-8 w-8 items-center justify-center rounded-full text-sm font-medium transition-colors',
+              status === 'complete' && 'bg-success text-success-foreground',
+              status === 'current' && 'bg-primary text-primary-foreground',
+              status === 'blocked' && 'bg-destructive/10 text-destructive border-2 border-destructive',
+              status === 'upcoming' && 'bg-muted text-muted-foreground'
+            )}>
+              {status === 'complete' ? (
+                <Check className="h-4 w-4" />
+              ) : status === 'blocked' ? (
+                <Lock className="h-4 w-4" />
+              ) : (
+                index + 1
+              )}
+            </div>
+            <div className="hidden sm:block">
+              <p className={cn(
+                'text-sm font-medium',
+                status === 'complete' && 'text-success',
+                status === 'current' && 'text-foreground',
+                status === 'blocked' && 'text-destructive',
+                status === 'upcoming' && 'text-muted-foreground'
+              )}>
+                {step.title}
+              </p>
+            </div>
+            {index < steps.length - 1 && (
+              <div className={cn(
+                'h-px w-8 mx-2',
+                status === 'complete' ? 'bg-success' : 'bg-border'
+              )} />
+            )}
+          </div>
+        );
+      })}
     </div>
   );
 }
@@ -148,11 +182,25 @@ function LaunchContent() {
     campaignName,
   });
 
-  // ONLY show AI-approved assets
-  const approvedAssets = useMemo(() => 
-    assets.filter(a => a.projectId === currentProject?.id && a.status === 'APPROVED'),
+  // ONLY show READY_FOR_LAUNCH assets (state machine requirement)
+  const readyAssets = useMemo(() => 
+    assets.filter(a => a.projectId === currentProject?.id && a.status === 'READY_FOR_LAUNCH'),
     [assets, currentProject?.id]
   );
+
+  // State Machine: Compute current publish flow state
+  const publishFlowValidation = usePublishFlowState({
+    selectedAssetIds,
+    readyAssetCount: readyAssets.length,
+    selectedPlatforms,
+    accountSelections,
+    campaignName,
+    landingPageUrl,
+    countries: audience.countries,
+    languages: audience.languages,
+    isExecuting: isLaunching,
+    isPublished: false,
+  });
 
   const getAccountsForPlatform = (platform: Platform): AdAccountConnection[] => {
     return currentProject?.connections.filter(
@@ -237,16 +285,28 @@ function LaunchContent() {
 
   const totalCampaigns = calculateTotalCampaigns(accountSelections);
 
-  // Step validation
-  const canProceedFromAssets = selectedAssetIds.length > 0;
-  const canProceedFromAccounts = selectedPlatforms.length > 0 && accountSelections.every(s => s.accountIds.length > 0);
-  const canProceedFromAudience = 
-    campaignName.trim() !== '' && 
-    landingPageUrl.trim() !== '' && 
-    audience.countries.length > 0 &&
-    audience.languages.length > 0;
+  // State Machine: Use computed validation for step transitions
+  const canProceedFromCurrentStep = (): { allowed: boolean; message: string | null } => {
+    return canTransitionStep(currentStep, getNextStep(currentStep), publishFlowValidation);
+  };
+
+  const getNextStep = (step: WizardStep): WizardStep => {
+    const steps: WizardStep[] = ['assets', 'accounts', 'audience', 'preview'];
+    const currentIndex = steps.indexOf(step);
+    return steps[Math.min(currentIndex + 1, steps.length - 1)];
+  };
 
   const goNext = () => {
+    const transition = canProceedFromCurrentStep();
+    if (!transition.allowed) {
+      toast({
+        title: 'Cannot Proceed',
+        description: transition.message || 'Complete current step requirements first.',
+        variant: 'destructive',
+      });
+      return;
+    }
+    
     const steps: WizardStep[] = ['assets', 'accounts', 'audience', 'preview'];
     const currentIndex = steps.indexOf(currentStep);
     if (currentIndex < steps.length - 1) {
@@ -432,26 +492,26 @@ function LaunchContent() {
         </CardContent>
       </Card>
 
-      {/* Asset Selection - ONLY APPROVED */}
+      {/* Asset Selection - ONLY READY_FOR_LAUNCH per state machine */}
       <Card className="border-border bg-card">
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
             <Video className="h-5 w-5" />
-            Select AI-Approved Assets
+            Select Ready Assets
           </CardTitle>
           <CardDescription>
-            Only assets that passed AI compliance can be selected. {selectedAssetIds.length} selected.
+            Only assets marked "Ready for Launch" can be selected. {selectedAssetIds.length} selected of {readyAssets.length} available.
           </CardDescription>
         </CardHeader>
         <CardContent>
-          {approvedAssets.length === 0 ? (
+          {readyAssets.length === 0 ? (
             <div className="rounded-lg border border-destructive/20 bg-destructive/5 p-6">
               <div className="flex items-center gap-3">
-                <AlertTriangle className="h-6 w-6 text-destructive" />
+                <Lock className="h-6 w-6 text-destructive" />
                 <div>
-                  <p className="font-medium text-foreground">No AI-Approved Assets</p>
+                  <p className="font-medium text-foreground">No Assets Ready for Launch</p>
                   <p className="text-sm text-muted-foreground">
-                    Go to Assets page and run AI analysis to approve assets for launch.
+                    Go to Assets page, run AI analysis, and mark approved assets as "Ready for Launch".
                   </p>
                 </div>
               </div>
@@ -465,7 +525,7 @@ function LaunchContent() {
             </div>
           ) : (
             <div className="space-y-2">
-              {approvedAssets.map(asset => (
+              {readyAssets.map(asset => (
                 <div
                   key={asset.id}
                   onClick={() => toggleAsset(asset.id)}
@@ -484,8 +544,8 @@ function LaunchContent() {
                     <p className="text-sm font-medium text-foreground">{asset.name}</p>
                     <div className="flex items-center gap-2 mt-1">
                       <Badge variant="default" className="bg-success/10 text-success border-success/20 text-xs gap-1">
-                        <CheckCircle2 className="h-3 w-3" />
-                        AI Approved
+                        <Rocket className="h-3 w-3" />
+                        Ready for Launch
                       </Badge>
                     </div>
                   </div>
@@ -929,11 +989,31 @@ function LaunchContent() {
 
       {/* Step Indicator with Execution Status */}
       <div className="flex items-center justify-between">
-        <StepIndicator currentStep={currentStep} steps={STEPS} />
+        <StepIndicator currentStep={currentStep} steps={STEPS} validation={publishFlowValidation} />
         {currentStep !== 'assets' && (
           <ExecutionStatusBadge status={executionReadiness.status} />
         )}
       </div>
+
+      {/* State Machine Blocker Alert */}
+      {publishFlowValidation.blockerMessage && currentStep !== 'preview' && (
+        <Alert variant="destructive" className="border-destructive/50 bg-destructive/5">
+          <AlertCircle className="h-4 w-4" />
+          <AlertDescription className="flex items-center justify-between">
+            <span>{publishFlowValidation.blockerMessage}</span>
+            {currentStep === 'assets' && readyAssets.length === 0 && (
+              <Button 
+                variant="outline" 
+                size="sm" 
+                onClick={() => navigate('/assets')}
+                className="ml-4"
+              >
+                Go to Assets
+              </Button>
+            )}
+          </AlertDescription>
+        </Alert>
+      )}
 
       {/* Step Content */}
       {currentStep === 'assets' && renderAssetsStep()}
@@ -946,7 +1026,7 @@ function LaunchContent() {
         <Button 
           variant="outline" 
           onClick={goBack}
-          disabled={currentStep === 'assets'}
+          disabled={currentStep === 'assets' || isLaunching}
         >
           <ChevronLeft className="mr-2 h-4 w-4" />
           Back
@@ -979,14 +1059,19 @@ function LaunchContent() {
         ) : (
           <Button 
             onClick={goNext}
-            disabled={
-              (currentStep === 'assets' && !canProceedFromAssets) ||
-              (currentStep === 'accounts' && !canProceedFromAccounts) ||
-              (currentStep === 'audience' && !canProceedFromAudience)
-            }
+            disabled={!canProceedFromCurrentStep().allowed || isLaunching}
           >
-            Next
-            <ChevronRight className="ml-2 h-4 w-4" />
+            {!canProceedFromCurrentStep().allowed ? (
+              <>
+                <Lock className="mr-2 h-4 w-4" />
+                Blocked
+              </>
+            ) : (
+              <>
+                Next
+                <ChevronRight className="ml-2 h-4 w-4" />
+              </>
+            )}
           </Button>
         )}
       </div>
