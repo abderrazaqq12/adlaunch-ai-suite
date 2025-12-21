@@ -145,28 +145,61 @@ function isActionAllowed(state: RuleState, action: RuleAction): boolean {
   return getAllowedActions(state).includes(action);
 }
 
-// Blocked event log
-const blockedEvents: any[] = [];
+// ============================================================================
+// NORMALIZED EVENT EMISSION
+// ============================================================================
 
-function logBlockedEvent(
+type AutomationEventType = 
+  | 'AUTOMATION_RULE_CREATED' | 'AUTOMATION_RULE_ENABLED' | 'AUTOMATION_RULE_DISABLED'
+  | 'AUTOMATION_TRIGGERED' | 'AUTOMATION_SKIPPED' | 'AUTOMATION_ACTION_EXECUTED'
+  | 'AUTOMATION_COOLDOWN_STARTED' | 'AUTOMATION_COOLDOWN_RESET'
+  | 'STATE_GUARD_BLOCKED' | 'STATE_TRANSITION_BLOCKED';
+
+type EventSource = 'UI' | 'AI' | 'AUTOMATION' | 'SYSTEM';
+
+interface NormalizedEvent {
+  eventId: string;
+  eventType: AutomationEventType;
+  source: EventSource;
+  entityType: 'RULE';
+  entityId: string;
+  previousState?: string;
+  newState?: string;
+  action?: string;
+  reason?: string;
+  metadata?: Record<string, unknown>;
+  timestamp: string;
+}
+
+const eventStore: NormalizedEvent[] = [];
+
+function generateEventId(): string {
+  return `evt_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+}
+
+function emitEvent(
+  eventType: AutomationEventType,
+  source: EventSource,
   entityId: string,
-  action: string,
-  reason: string,
-  guardName: string,
-  context?: Record<string, unknown>
-) {
-  const event = {
-    id: `blocked_${Date.now()}`,
-    type: 'GUARD_BLOCKED',
-    entity: 'RULE',
+  options: {
+    previousState?: string;
+    newState?: string;
+    action?: string;
+    reason?: string;
+    metadata?: Record<string, unknown>;
+  } = {}
+): NormalizedEvent {
+  const event: NormalizedEvent = {
+    eventId: generateEventId(),
+    eventType,
+    source,
+    entityType: 'RULE',
     entityId,
-    action,
-    reason,
-    metadata: { guardName, ...context },
     timestamp: new Date().toISOString(),
+    ...options,
   };
-  blockedEvents.push(event);
-  console.log(`[automation] GUARD_BLOCKED: ${guardName} - ${reason}`);
+  eventStore.unshift(event);
+  console.log(`[automation] EVENT: ${eventType} | RULE/${entityId} | source=${source}`);
   return event;
 }
 
@@ -375,7 +408,10 @@ serve(async (req) => {
 
       // STATE MACHINE CHECK
       if (!isActionAllowed(rule.state, 'EXECUTE')) {
-        logBlockedEvent(ruleId, 'EXECUTE', `Action not allowed in ${rule.state} state`, 'STATE_MACHINE');
+        emitEvent('STATE_TRANSITION_BLOCKED', 'SYSTEM', ruleId, {
+          action: 'EXECUTE',
+          reason: `Action not allowed in ${rule.state} state`,
+        });
         return new Response(JSON.stringify({
           error: 'INVALID_TRANSITION',
           message: `Cannot execute rule in ${rule.state} state`,
@@ -407,19 +443,11 @@ serve(async (req) => {
       );
 
       if (!guardResult.allowed) {
-        // Log BLOCKED_EVENT
-        logBlockedEvent(
-          ruleId,
-          'EXECUTE',
-          guardResult.reason!,
-          'guardAutomationAction',
-          { 
-            campaignId, 
-            campaignState: campaign.state,
-            actionsToday: rule.actionsToday,
-            maxActionsPerDay: rule.maxActionsPerDay,
-          }
-        );
+        emitEvent('STATE_GUARD_BLOCKED', 'SYSTEM', ruleId, {
+          action: 'EXECUTE',
+          reason: guardResult.reason,
+          metadata: { guardName: 'guardAutomationAction', campaignId, campaignState: campaign.state },
+        });
 
         return new Response(JSON.stringify({
           error: 'GUARD_BLOCKED',
@@ -472,16 +500,8 @@ serve(async (req) => {
       }
 
       if (!isActionAllowed(rule.state, 'ENABLE')) {
-        logBlockedEvent(ruleId, 'ENABLE', `Action not allowed in ${rule.state} state`, 'STATE_MACHINE');
-        return new Response(JSON.stringify({
-          error: 'INVALID_TRANSITION',
-          message: `Cannot enable rule in ${rule.state} state`,
-          currentState: rule.state,
-          allowedActions: getAllowedActions(rule.state),
-        }), {
-          status: 403,
-          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-        });
+        emitEvent('STATE_TRANSITION_BLOCKED', 'SYSTEM', ruleId, { action: 'ENABLE', reason: `Action not allowed in ${rule.state} state` });
+        return new Response(JSON.stringify({ error: 'INVALID_TRANSITION', message: `Cannot enable rule in ${rule.state} state`, currentState: rule.state, allowedActions: getAllowedActions(rule.state) }), { status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
       }
 
       rule.state = 'ACTIVE';
@@ -510,16 +530,8 @@ serve(async (req) => {
       }
 
       if (!isActionAllowed(rule.state, 'DISABLE')) {
-        logBlockedEvent(ruleId, 'DISABLE', `Action not allowed in ${rule.state} state`, 'STATE_MACHINE');
-        return new Response(JSON.stringify({
-          error: 'INVALID_TRANSITION',
-          message: `Cannot disable rule in ${rule.state} state`,
-          currentState: rule.state,
-          allowedActions: getAllowedActions(rule.state),
-        }), {
-          status: 403,
-          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-        });
+        emitEvent('STATE_TRANSITION_BLOCKED', 'SYSTEM', ruleId, { action: 'DISABLE', reason: `Action not allowed in ${rule.state} state` });
+        return new Response(JSON.stringify({ error: 'INVALID_TRANSITION', message: `Cannot disable rule in ${rule.state} state`, currentState: rule.state, allowedActions: getAllowedActions(rule.state) }), { status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
       }
 
       rule.state = 'DISABLED';
@@ -549,16 +561,8 @@ serve(async (req) => {
       }
 
       if (!isActionAllowed(rule.state, 'RESET_COOLDOWN')) {
-        logBlockedEvent(ruleId, 'RESET_COOLDOWN', `Action not allowed in ${rule.state} state`, 'STATE_MACHINE');
-        return new Response(JSON.stringify({
-          error: 'INVALID_TRANSITION',
-          message: `Cannot reset cooldown in ${rule.state} state`,
-          currentState: rule.state,
-          allowedActions: getAllowedActions(rule.state),
-        }), {
-          status: 403,
-          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-        });
+        emitEvent('STATE_TRANSITION_BLOCKED', 'SYSTEM', ruleId, { action: 'RESET_COOLDOWN', reason: `Action not allowed in ${rule.state} state` });
+        return new Response(JSON.stringify({ error: 'INVALID_TRANSITION', message: `Cannot reset cooldown in ${rule.state} state`, currentState: rule.state, allowedActions: getAllowedActions(rule.state) }), { status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
       }
 
       rule.state = 'ACTIVE';
@@ -588,29 +592,24 @@ serve(async (req) => {
       }
 
       if (!isActionAllowed(rule.state, 'DELETE')) {
-        logBlockedEvent(ruleId, 'DELETE', `Action not allowed in ${rule.state} state`, 'STATE_MACHINE');
-        return new Response(JSON.stringify({
-          error: 'INVALID_TRANSITION',
-          message: `Cannot delete rule in ${rule.state} state. Disable it first.`,
-          currentState: rule.state,
-          allowedActions: getAllowedActions(rule.state),
-        }), {
-          status: 403,
-          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-        });
+        emitEvent('STATE_TRANSITION_BLOCKED', 'SYSTEM', ruleId, { action: 'DELETE', reason: `Action not allowed in ${rule.state} state` });
+        return new Response(JSON.stringify({ error: 'INVALID_TRANSITION', message: `Cannot delete rule in ${rule.state} state. Disable it first.`, currentState: rule.state, allowedActions: getAllowedActions(rule.state) }), { status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
       }
 
       mockRules.delete(ruleId);
-      console.log(`[automation] Deleted rule ${ruleId}`);
 
       return new Response(JSON.stringify({ success: true, deletedId: ruleId }), {
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       });
     }
 
-    // GET /automation/blocked-events - Get blocked event log
-    if (req.method === 'GET' && pathParts.length === 2 && pathParts[1] === 'blocked-events') {
-      return new Response(JSON.stringify({ events: blockedEvents }), {
+    // GET /automation/events - Get all automation events (normalized schema)
+    if (req.method === 'GET' && pathParts.length === 2 && pathParts[1] === 'events') {
+      const blockedOnly = url.searchParams.get('blocked') === 'true';
+      const filtered = blockedOnly 
+        ? eventStore.filter(e => e.eventType.includes('BLOCKED'))
+        : eventStore;
+      return new Response(JSON.stringify({ events: filtered }), {
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       });
     }

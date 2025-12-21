@@ -205,28 +205,62 @@ function isCampaignActionAllowed(state: CampaignState, action: CampaignAction): 
   return getCampaignAllowedActions(state).includes(action);
 }
 
-// Blocked event log
-const blockedEvents: any[] = [];
+// ============================================================================
+// NORMALIZED EVENT EMISSION
+// ============================================================================
 
-function logBlockedEvent(
+type CampaignEventType = 
+  | 'CAMPAIGN_INTENT_CREATED' | 'CAMPAIGN_INTENT_VALIDATED' 
+  | 'CAMPAIGN_PUBLISHED' | 'CAMPAIGN_PAUSED' | 'CAMPAIGN_RESUMED' | 'CAMPAIGN_STOPPED'
+  | 'CAMPAIGN_BLOCKED' | 'STATE_GUARD_BLOCKED' | 'STATE_TRANSITION_BLOCKED';
+
+type EventSource = 'UI' | 'AI' | 'AUTOMATION' | 'SYSTEM';
+type EntityType = 'CAMPAIGN' | 'INTENT';
+
+interface NormalizedEvent {
+  eventId: string;
+  eventType: CampaignEventType;
+  source: EventSource;
+  entityType: EntityType;
+  entityId: string;
+  previousState?: string;
+  newState?: string;
+  action?: string;
+  reason?: string;
+  metadata?: Record<string, unknown>;
+  timestamp: string;
+}
+
+const eventStore: NormalizedEvent[] = [];
+
+function generateEventId(): string {
+  return `evt_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+}
+
+function emitEvent(
+  eventType: CampaignEventType,
+  source: EventSource,
+  entityType: EntityType,
   entityId: string,
-  action: string,
-  reason: string,
-  guardName: string,
-  context?: Record<string, unknown>
-) {
-  const event = {
-    id: `blocked_${Date.now()}`,
-    type: 'GUARD_BLOCKED',
-    entity: 'CAMPAIGN',
+  options: {
+    previousState?: string;
+    newState?: string;
+    action?: string;
+    reason?: string;
+    metadata?: Record<string, unknown>;
+  } = {}
+): NormalizedEvent {
+  const event: NormalizedEvent = {
+    eventId: generateEventId(),
+    eventType,
+    source,
+    entityType,
     entityId,
-    action,
-    reason,
-    metadata: { guardName, ...context },
     timestamp: new Date().toISOString(),
+    ...options,
   };
-  blockedEvents.push(event);
-  console.log(`[campaigns] GUARD_BLOCKED: ${guardName} - ${reason}`);
+  eventStore.unshift(event);
+  console.log(`[campaigns] EVENT: ${eventType} | ${entityType}/${entityId} | source=${source}`);
   return event;
 }
 
@@ -383,7 +417,11 @@ serve(async (req) => {
 
       // STATE MACHINE CHECK
       if (!isIntentActionAllowed(intent.state, 'PUBLISH')) {
-        logBlockedEvent(intentId, 'PUBLISH', `Cannot publish in ${intent.state} state`, 'STATE_MACHINE');
+        emitEvent('STATE_TRANSITION_BLOCKED', 'SYSTEM', 'INTENT', intentId, {
+          action: 'PUBLISH',
+          reason: `Cannot publish in ${intent.state} state`,
+          metadata: { currentState: intent.state },
+        });
         return new Response(JSON.stringify({
           error: 'INVALID_TRANSITION',
           message: `Cannot publish in ${intent.state} state. Must be READY_TO_PUBLISH.`,
@@ -416,7 +454,9 @@ serve(async (req) => {
         };
       });
 
-      const targetPlatforms: string[] = [...new Set(accountDetails.map((a: any) => a.platform as string))];
+      const targetPlatforms: string[] = Array.from(
+        new Set(accountDetails.map((a: { platform: string }) => a.platform))
+      );
 
       // RUN CAMPAIGN PUBLISH GUARD (Pure function)
       const guardResult = guardCampaignPublish({
@@ -430,14 +470,12 @@ serve(async (req) => {
       });
 
       if (!guardResult.allowed) {
-        // Log BLOCKED_EVENT
-        logBlockedEvent(
-          intentId,
-          'PUBLISH',
-          guardResult.reason!,
-          'guardCampaignPublish',
-          { targetPlatforms, accountCount: accountDetails.length, assetCount: assetDetails.length }
-        );
+        // Emit STATE_GUARD_BLOCKED event
+        emitEvent('STATE_GUARD_BLOCKED', 'SYSTEM', 'INTENT', intentId, {
+          action: 'PUBLISH',
+          reason: guardResult.reason,
+          metadata: { guardName: 'guardCampaignPublish', targetPlatforms, accountCount: accountDetails.length, assetCount: assetDetails.length },
+        });
 
         return new Response(JSON.stringify({
           error: 'GUARD_BLOCKED',
@@ -551,7 +589,11 @@ serve(async (req) => {
       }
 
       if (!isCampaignActionAllowed(campaign.state, 'PAUSE')) {
-        logBlockedEvent(campaignId, 'PAUSE', `Cannot pause in ${campaign.state} state`, 'STATE_MACHINE');
+        emitEvent('STATE_TRANSITION_BLOCKED', 'SYSTEM', 'CAMPAIGN', campaignId, {
+          action: 'PAUSE',
+          reason: `Cannot pause in ${campaign.state} state`,
+          metadata: { currentState: campaign.state },
+        });
         return new Response(JSON.stringify({
           error: 'INVALID_TRANSITION',
           message: `Cannot pause campaign in ${campaign.state} state`,
@@ -563,10 +605,15 @@ serve(async (req) => {
         });
       }
 
+      const pausePrev = campaign.state;
       campaign.state = 'PAUSED';
       campaign.updatedAt = new Date().toISOString();
       mockCampaigns.set(campaignId, campaign);
-      console.log(`[campaigns] Paused campaign ${campaignId}`);
+      
+      emitEvent('CAMPAIGN_PAUSED', 'UI', 'CAMPAIGN', campaignId, {
+        previousState: pausePrev,
+        newState: 'PAUSED',
+      });
 
       return new Response(JSON.stringify({
         ...campaign,
@@ -589,7 +636,11 @@ serve(async (req) => {
       }
 
       if (!isCampaignActionAllowed(campaign.state, 'RESUME')) {
-        logBlockedEvent(campaignId, 'RESUME', `Cannot resume in ${campaign.state} state`, 'STATE_MACHINE');
+        emitEvent('STATE_TRANSITION_BLOCKED', 'SYSTEM', 'CAMPAIGN', campaignId, {
+          action: 'RESUME',
+          reason: `Cannot resume in ${campaign.state} state`,
+          metadata: { currentState: campaign.state },
+        });
         return new Response(JSON.stringify({
           error: 'INVALID_TRANSITION',
           message: `Cannot resume campaign in ${campaign.state} state`,
@@ -601,10 +652,15 @@ serve(async (req) => {
         });
       }
 
+      const resumePrev = campaign.state;
       campaign.state = 'ACTIVE';
       campaign.updatedAt = new Date().toISOString();
       mockCampaigns.set(campaignId, campaign);
-      console.log(`[campaigns] Resumed campaign ${campaignId}`);
+      
+      emitEvent('CAMPAIGN_RESUMED', 'UI', 'CAMPAIGN', campaignId, {
+        previousState: resumePrev,
+        newState: 'ACTIVE',
+      });
 
       return new Response(JSON.stringify({
         ...campaign,
@@ -627,7 +683,11 @@ serve(async (req) => {
       }
 
       if (!isCampaignActionAllowed(campaign.state, 'STOP')) {
-        logBlockedEvent(campaignId, 'STOP', `Cannot stop in ${campaign.state} state`, 'STATE_MACHINE');
+        emitEvent('STATE_TRANSITION_BLOCKED', 'SYSTEM', 'CAMPAIGN', campaignId, {
+          action: 'STOP',
+          reason: `Cannot stop in ${campaign.state} state`,
+          metadata: { currentState: campaign.state },
+        });
         return new Response(JSON.stringify({
           error: 'INVALID_TRANSITION',
           message: `Cannot stop campaign in ${campaign.state} state`,
@@ -639,10 +699,15 @@ serve(async (req) => {
         });
       }
 
+      const stopPrev = campaign.state;
       campaign.state = 'STOPPED';
       campaign.updatedAt = new Date().toISOString();
       mockCampaigns.set(campaignId, campaign);
-      console.log(`[campaigns] Stopped campaign ${campaignId}`);
+      
+      emitEvent('CAMPAIGN_STOPPED', 'UI', 'CAMPAIGN', campaignId, {
+        previousState: stopPrev,
+        newState: 'STOPPED',
+      });
 
       return new Response(JSON.stringify({
         ...campaign,
@@ -652,9 +717,13 @@ serve(async (req) => {
       });
     }
 
-    // GET /campaigns/blocked-events - Get blocked event log
-    if (req.method === 'GET' && pathParts.length === 2 && pathParts[1] === 'blocked-events') {
-      return new Response(JSON.stringify({ events: blockedEvents }), {
+    // GET /campaigns/events - Get all campaign events (normalized schema)
+    if (req.method === 'GET' && pathParts.length === 2 && pathParts[1] === 'events') {
+      const blockedOnly = url.searchParams.get('blocked') === 'true';
+      const filtered = blockedOnly 
+        ? eventStore.filter(e => e.eventType.includes('BLOCKED'))
+        : eventStore;
+      return new Response(JSON.stringify({ events: filtered }), {
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       });
     }
