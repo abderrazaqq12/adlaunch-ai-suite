@@ -1,4 +1,6 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2.89.0";
+import { authenticateRequest, unauthorizedResponse, createUserClient, extractBearerToken } from "../_shared/auth.ts";
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -74,56 +76,83 @@ function isActionAllowed(state: AdAccountState, permissions: Permission[], actio
   return getAllowedActions(state, permissions).includes(action);
 }
 
-// Mock database
-const mockAccounts: Map<string, any> = new Map();
+// Helper to convert DB permissions to Permission[]
+function parsePermissions(permJson: any): Permission[] {
+  const perms: Permission[] = [];
+  if (permJson?.canAnalyze) perms.push('ANALYZE');
+  if (permJson?.canLaunch) perms.push('LAUNCH');
+  if (permJson?.canMonitor) perms.push('OPTIMIZE');
+  return perms;
+}
 
-// Initialize with some mock accounts
-mockAccounts.set('acc_google_1', {
-  id: 'acc_google_1',
-  platform: 'GOOGLE',
-  accountId: '123-456-7890',
-  accountName: 'My Google Ads Account',
-  state: 'FULL_ACCESS',
-  permissions: ['ANALYZE', 'LAUNCH', 'OPTIMIZE'],
-  createdAt: new Date().toISOString(),
-  updatedAt: new Date().toISOString(),
-});
-
-mockAccounts.set('acc_tiktok_1', {
-  id: 'acc_tiktok_1',
-  platform: 'TIKTOK',
-  accountId: 'tt_ads_001',
-  accountName: 'TikTok Business',
-  state: 'LIMITED_PERMISSION',
-  permissions: ['ANALYZE'],
-  createdAt: new Date().toISOString(),
-  updatedAt: new Date().toISOString(),
-});
+// Helper to convert Permission[] to DB format
+function toDbPermissions(perms: Permission[]): Record<string, boolean> {
+  return {
+    canAnalyze: perms.includes('ANALYZE'),
+    canLaunch: perms.includes('LAUNCH'),
+    canMonitor: perms.includes('OPTIMIZE'),
+  };
+}
 
 serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders });
   }
 
+  // Authenticate request
+  const authResult = await authenticateRequest(req);
+  if (!authResult.authenticated) {
+    return unauthorizedResponse(authResult.error || 'Unauthorized', corsHeaders);
+  }
+  const userId = authResult.userId!;
+
+  const token = extractBearerToken(req);
+  if (!token) {
+    return unauthorizedResponse('Missing token', corsHeaders);
+  }
+
+  const supabase = createUserClient(token);
   const url = new URL(req.url);
   const pathParts = url.pathname.split('/').filter(Boolean);
+  const projectId = url.searchParams.get('projectId');
   
-  console.log(`[ad-accounts] ${req.method} ${url.pathname}`);
+  console.log(`[ad-accounts] ${req.method} ${url.pathname} user=${userId}`);
 
   try {
     // GET /ad-accounts - List all accounts with state and allowed actions
     if (req.method === 'GET' && pathParts.length === 1) {
-      const accounts = Array.from(mockAccounts.values()).map(account => ({
-        id: account.id,
-        platform: account.platform,
-        accountId: account.accountId,
-        accountName: account.accountName,
-        state: account.state,
-        permissions: account.permissions,
-        allowedActions: getAllowedActions(account.state, account.permissions),
-      }));
+      let query = supabase
+        .from('ad_account_connections')
+        .select('*')
+        .order('created_at', { ascending: false });
 
-      return new Response(JSON.stringify({ accounts }), {
+      if (projectId) {
+        query = query.eq('project_id', projectId);
+      }
+
+      const { data: accounts, error } = await query;
+
+      if (error) {
+        console.error('[ad-accounts] List error:', error);
+        throw error;
+      }
+
+      const formattedAccounts = (accounts || []).map(account => {
+        const permissions = parsePermissions(account.permissions);
+        const state = account.status.toUpperCase() as AdAccountState;
+        return {
+          id: account.id,
+          platform: account.platform.toUpperCase(),
+          accountId: account.account_id,
+          accountName: account.account_name,
+          state,
+          permissions,
+          allowedActions: getAllowedActions(state, permissions),
+          projectId: account.project_id,
+        };
+      });
+
+      return new Response(JSON.stringify({ accounts: formattedAccounts }), {
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       });
     }
@@ -131,18 +160,32 @@ serve(async (req) => {
     // GET /ad-accounts/{id} - Get single account
     if (req.method === 'GET' && pathParts.length === 2) {
       const accountId = pathParts[1];
-      const account = mockAccounts.get(accountId);
       
-      if (!account) {
+      const { data: account, error } = await supabase
+        .from('ad_account_connections')
+        .select('*')
+        .eq('id', accountId)
+        .single();
+      
+      if (error || !account) {
         return new Response(JSON.stringify({ error: 'Account not found' }), {
           status: 404,
           headers: { ...corsHeaders, 'Content-Type': 'application/json' },
         });
       }
 
+      const permissions = parsePermissions(account.permissions);
+      const state = account.status.toUpperCase() as AdAccountState;
+
       return new Response(JSON.stringify({
-        ...account,
-        allowedActions: getAllowedActions(account.state, account.permissions),
+        id: account.id,
+        platform: account.platform.toUpperCase(),
+        accountId: account.account_id,
+        accountName: account.account_name,
+        state,
+        permissions,
+        allowedActions: getAllowedActions(state, permissions),
+        projectId: account.project_id,
       }), {
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       });
@@ -151,7 +194,8 @@ serve(async (req) => {
     // POST /ad-accounts/connect - Initiate OAuth connection
     if (req.method === 'POST' && pathParts.length === 2 && pathParts[1] === 'connect') {
       const body = await req.json();
-      const { platform } = body;
+      const { platform, projectId: bodyProjectId } = body;
+      const targetProjectId = bodyProjectId || projectId;
       
       if (!['GOOGLE', 'TIKTOK', 'SNAPCHAT'].includes(platform)) {
         return new Response(JSON.stringify({ error: 'Invalid platform' }), {
@@ -160,39 +204,57 @@ serve(async (req) => {
         });
       }
 
-      const accountId = `acc_${platform.toLowerCase()}_${Date.now()}`;
-      const now = new Date().toISOString();
-      
-      const newAccount = {
-        id: accountId,
-        platform,
-        accountId: null,
-        accountName: null,
-        state: 'CONNECTING' as AdAccountState,
-        permissions: [],
-        createdAt: now,
-        updatedAt: now,
-      };
-      
-      mockAccounts.set(accountId, newAccount);
-      console.log(`[ad-accounts] Started OAuth for ${platform}`);
+      if (!targetProjectId) {
+        return new Response(JSON.stringify({ error: 'projectId is required' }), {
+          status: 400,
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        });
+      }
 
-      // Simulate OAuth completion after delay
-      setTimeout(() => {
-        const account = mockAccounts.get(accountId);
-        if (account && account.state === 'CONNECTING') {
-          account.state = 'FULL_ACCESS';
-          account.accountId = `${platform.toLowerCase()}_${Date.now()}`;
-          account.accountName = `${platform} Business Account`;
-          account.permissions = ['ANALYZE', 'LAUNCH', 'OPTIMIZE'];
-          account.updatedAt = new Date().toISOString();
-          mockAccounts.set(accountId, account);
-          console.log(`[ad-accounts] OAuth completed for ${accountId}`);
-        }
+      // Create new connection in CONNECTING state
+      const { data: newAccount, error } = await supabase
+        .from('ad_account_connections')
+        .insert({
+          user_id: userId,
+          project_id: targetProjectId,
+          platform: platform.toLowerCase(),
+          account_id: `pending_${Date.now()}`,
+          account_name: `${platform} Account (Connecting...)`,
+          status: 'connecting',
+          permissions: { canAnalyze: false, canLaunch: false, canMonitor: false },
+        })
+        .select()
+        .single();
+
+      if (error) {
+        console.error('[ad-accounts] Connect error:', error);
+        throw error;
+      }
+
+      console.log(`[ad-accounts] Started OAuth for ${platform} user=${userId}`);
+
+      // In a real implementation, we'd redirect to OAuth
+      // For now, simulate OAuth completion with a service client update
+      const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
+      const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
+      const serviceClient = createClient(supabaseUrl, supabaseServiceKey);
+
+      // Simulate OAuth completion (in production, this would be a callback endpoint)
+      setTimeout(async () => {
+        await serviceClient
+          .from('ad_account_connections')
+          .update({
+            status: 'full_access',
+            account_id: `${platform.toLowerCase()}_${Date.now()}`,
+            account_name: `${platform} Business Account`,
+            permissions: { canAnalyze: true, canLaunch: true, canMonitor: true },
+          })
+          .eq('id', newAccount.id);
+        console.log(`[ad-accounts] OAuth completed for ${newAccount.id}`);
       }, 3000);
 
       return new Response(JSON.stringify({
-        id: accountId,
+        id: newAccount.id,
         state: 'CONNECTING',
         allowedActions: [],
         message: 'OAuth flow initiated',
@@ -206,36 +268,58 @@ serve(async (req) => {
     // POST /ad-accounts/{id}/disconnect - Disconnect account
     if (req.method === 'POST' && pathParts.length === 3 && pathParts[2] === 'disconnect') {
       const accountId = pathParts[1];
-      const account = mockAccounts.get(accountId);
       
-      if (!account) {
+      const { data: account, error: fetchError } = await supabase
+        .from('ad_account_connections')
+        .select('*')
+        .eq('id', accountId)
+        .single();
+      
+      if (fetchError || !account) {
         return new Response(JSON.stringify({ error: 'Account not found' }), {
           status: 404,
           headers: { ...corsHeaders, 'Content-Type': 'application/json' },
         });
       }
 
-      if (!isActionAllowed(account.state, account.permissions, 'DISCONNECT')) {
+      const permissions = parsePermissions(account.permissions);
+      const state = account.status.toUpperCase() as AdAccountState;
+
+      if (!isActionAllowed(state, permissions, 'DISCONNECT')) {
         return new Response(JSON.stringify({
           error: 'INVALID_TRANSITION',
-          message: `Cannot disconnect account in ${account.state} state`,
-          currentState: account.state,
-          allowedActions: getAllowedActions(account.state, account.permissions),
+          message: `Cannot disconnect account in ${state} state`,
+          currentState: state,
+          allowedActions: getAllowedActions(state, permissions),
         }), {
           status: 403,
           headers: { ...corsHeaders, 'Content-Type': 'application/json' },
         });
       }
 
-      account.state = 'DISCONNECTED';
-      account.permissions = [];
-      account.updatedAt = new Date().toISOString();
-      mockAccounts.set(accountId, account);
+      const { error: updateError } = await supabase
+        .from('ad_account_connections')
+        .update({
+          status: 'disconnected',
+          permissions: { canAnalyze: false, canLaunch: false, canMonitor: false },
+        })
+        .eq('id', accountId);
+
+      if (updateError) {
+        console.error('[ad-accounts] Disconnect error:', updateError);
+        throw updateError;
+      }
+
       console.log(`[ad-accounts] Disconnected ${accountId}`);
 
       return new Response(JSON.stringify({
-        ...account,
-        allowedActions: getAllowedActions(account.state, account.permissions),
+        id: account.id,
+        platform: account.platform.toUpperCase(),
+        accountId: account.account_id,
+        accountName: account.account_name,
+        state: 'DISCONNECTED',
+        permissions: [],
+        allowedActions: ['CONNECT'],
       }), {
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       });
@@ -244,38 +328,81 @@ serve(async (req) => {
     // POST /ad-accounts/{id}/refresh - Refresh permissions
     if (req.method === 'POST' && pathParts.length === 3 && pathParts[2] === 'refresh') {
       const accountId = pathParts[1];
-      const account = mockAccounts.get(accountId);
       
-      if (!account) {
+      const { data: account, error: fetchError } = await supabase
+        .from('ad_account_connections')
+        .select('*')
+        .eq('id', accountId)
+        .single();
+      
+      if (fetchError || !account) {
         return new Response(JSON.stringify({ error: 'Account not found' }), {
           status: 404,
           headers: { ...corsHeaders, 'Content-Type': 'application/json' },
         });
       }
 
-      if (!isActionAllowed(account.state, account.permissions, 'REFRESH_PERMISSIONS')) {
+      const permissions = parsePermissions(account.permissions);
+      const state = account.status.toUpperCase() as AdAccountState;
+
+      if (!isActionAllowed(state, permissions, 'REFRESH_PERMISSIONS')) {
         return new Response(JSON.stringify({
           error: 'INVALID_TRANSITION',
-          message: `Cannot refresh permissions in ${account.state} state`,
-          currentState: account.state,
-          allowedActions: getAllowedActions(account.state, account.permissions),
+          message: `Cannot refresh permissions in ${state} state`,
+          currentState: state,
+          allowedActions: getAllowedActions(state, permissions),
         }), {
           status: 403,
           headers: { ...corsHeaders, 'Content-Type': 'application/json' },
         });
       }
 
-      // Simulate permission refresh
-      account.permissions = ['ANALYZE', 'LAUNCH', 'OPTIMIZE'];
-      account.state = 'FULL_ACCESS';
-      account.updatedAt = new Date().toISOString();
-      mockAccounts.set(accountId, account);
+      // Simulate permission refresh - grant full access
+      const { error: updateError } = await supabase
+        .from('ad_account_connections')
+        .update({
+          status: 'full_access',
+          permissions: { canAnalyze: true, canLaunch: true, canMonitor: true },
+        })
+        .eq('id', accountId);
+
+      if (updateError) {
+        console.error('[ad-accounts] Refresh error:', updateError);
+        throw updateError;
+      }
+
       console.log(`[ad-accounts] Refreshed permissions for ${accountId}`);
 
       return new Response(JSON.stringify({
-        ...account,
-        allowedActions: getAllowedActions(account.state, account.permissions),
+        id: account.id,
+        platform: account.platform.toUpperCase(),
+        accountId: account.account_id,
+        accountName: account.account_name,
+        state: 'FULL_ACCESS',
+        permissions: ['ANALYZE', 'LAUNCH', 'OPTIMIZE'],
+        allowedActions: getAllowedActions('FULL_ACCESS', ['ANALYZE', 'LAUNCH', 'OPTIMIZE']),
       }), {
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
+
+    // DELETE /ad-accounts/{id} - Delete account connection
+    if (req.method === 'DELETE' && pathParts.length === 2) {
+      const accountId = pathParts[1];
+      
+      const { error } = await supabase
+        .from('ad_account_connections')
+        .delete()
+        .eq('id', accountId);
+
+      if (error) {
+        console.error('[ad-accounts] Delete error:', error);
+        throw error;
+      }
+
+      console.log(`[ad-accounts] Deleted ${accountId}`);
+
+      return new Response(JSON.stringify({ success: true }), {
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       });
     }

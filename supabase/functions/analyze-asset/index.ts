@@ -1,4 +1,5 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
+import { authenticateRequest, unauthorizedResponse, createUserClient, extractBearerToken } from "../_shared/auth.ts";
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -50,18 +51,68 @@ Consider these advertising policies:
 
 Be thorough but fair. Minor issues should result in warnings, not rejections.`;
 
+// Helper to emit events to the events table
+async function emitEvent(
+  supabase: any,
+  userId: string,
+  eventType: string,
+  entityType: string,
+  entityId: string,
+  data: {
+    previousState?: string;
+    newState?: string;
+    action?: string;
+    reason?: string;
+    metadata?: Record<string, any>;
+  }
+) {
+  const event = {
+    event_id: crypto.randomUUID(),
+    event_type: eventType,
+    source: 'AI',
+    entity_type: entityType,
+    entity_id: entityId,
+    user_id: userId,
+    previous_state: data.previousState,
+    new_state: data.newState,
+    action: data.action,
+    reason: data.reason,
+    metadata: data.metadata || {},
+  };
+
+  const { error } = await supabase.from('events').insert(event);
+  if (error) {
+    console.error('[analyze-asset] Failed to emit event:', error);
+  }
+  return event;
+}
+
 serve(async (req) => {
   // Handle CORS preflight
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders });
   }
 
+  // Authenticate request
+  const authResult = await authenticateRequest(req);
+  if (!authResult.authenticated) {
+    return unauthorizedResponse(authResult.error || 'Unauthorized', corsHeaders);
+  }
+  const userId = authResult.userId!;
+
+  const token = extractBearerToken(req);
+  if (!token) {
+    return unauthorizedResponse('Missing token', corsHeaders);
+  }
+
+  const supabase = createUserClient(token);
+
   try {
-    const { asset, assets } = await req.json();
+    const { asset, assets, projectId } = await req.json();
     const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
     
     if (!LOVABLE_API_KEY) {
-      console.error("LOVABLE_API_KEY is not configured");
+      console.error("[analyze-asset] LOVABLE_API_KEY is not configured");
       throw new Error("AI service not configured");
     }
 
@@ -72,12 +123,21 @@ serve(async (req) => {
       throw new Error("No assets provided for analysis");
     }
 
-    console.log(`Analyzing ${assetsToAnalyze.length} asset(s)`);
+    console.log(`[analyze-asset] Analyzing ${assetsToAnalyze.length} asset(s) for user=${userId}`);
 
     const results: AnalysisResult[] = [];
 
     for (const assetItem of assetsToAnalyze) {
-      console.log(`Analyzing asset: ${assetItem.id} (${assetItem.type})`);
+      console.log(`[analyze-asset] Analyzing asset: ${assetItem.id} (${assetItem.type})`);
+      
+      // Get current asset state from database
+      const { data: dbAsset } = await supabase
+        .from('assets')
+        .select('state')
+        .eq('id', assetItem.id)
+        .single();
+
+      const previousState = dbAsset?.state || 'UPLOADED';
       
       const userPrompt = `Analyze this advertising creative asset:
 
@@ -122,7 +182,7 @@ Only include rejectionReasons for high or critical severity issues that warrant 
 
       if (!response.ok) {
         const errorText = await response.text();
-        console.error(`AI gateway error for asset ${assetItem.id}:`, response.status, errorText);
+        console.error(`[analyze-asset] AI gateway error for asset ${assetItem.id}:`, response.status, errorText);
         
         if (response.status === 429) {
           throw new Error("Rate limit exceeded. Please try again later.");
@@ -137,11 +197,11 @@ Only include rejectionReasons for high or critical severity issues that warrant 
       const content = data.choices?.[0]?.message?.content;
       
       if (!content) {
-        console.error(`Empty response for asset ${assetItem.id}`);
+        console.error(`[analyze-asset] Empty response for asset ${assetItem.id}`);
         throw new Error("AI returned empty response");
       }
 
-      console.log(`Raw AI response for ${assetItem.id}:`, content.substring(0, 200));
+      console.log(`[analyze-asset] Raw AI response for ${assetItem.id}:`, content.substring(0, 200));
 
       // Parse JSON from response (handle markdown code blocks)
       let analysisJson: any;
@@ -151,7 +211,7 @@ Only include rejectionReasons for high or critical severity issues that warrant 
         const jsonStr = jsonMatch ? jsonMatch[1] : content;
         analysisJson = JSON.parse(jsonStr.trim());
       } catch (parseError) {
-        console.error(`Failed to parse AI response for ${assetItem.id}:`, parseError);
+        console.error(`[analyze-asset] Failed to parse AI response for ${assetItem.id}:`, parseError);
         // Fallback to safe defaults
         analysisJson = {
           policyRiskScore: 30,
@@ -162,9 +222,42 @@ Only include rejectionReasons for high or critical severity issues that warrant 
         };
       }
 
+      const approved = analysisJson.approved ?? (analysisJson.policyRiskScore < 50);
+      const newState = approved ? 'APPROVED' : 'BLOCKED';
+
+      // Update asset in database
+      const { error: updateError } = await supabase
+        .from('assets')
+        .update({
+          state: newState,
+          risk_score: Math.min(100, Math.max(0, analysisJson.policyRiskScore ?? 30)),
+          quality_score: Math.min(100, Math.max(0, analysisJson.creativeQualityScore ?? 70)),
+          issues: analysisJson.issues ?? [],
+          rejection_reasons: analysisJson.rejectionReasons ?? [],
+          analysis_result: analysisJson,
+        })
+        .eq('id', assetItem.id);
+
+      if (updateError) {
+        console.error(`[analyze-asset] Failed to update asset ${assetItem.id}:`, updateError);
+      }
+
+      // Emit appropriate event
+      await emitEvent(supabase, userId, approved ? 'ASSET_APPROVED' : 'ASSET_BLOCKED', 'ASSET', assetItem.id, {
+        previousState,
+        newState,
+        action: 'analyze',
+        reason: approved ? undefined : analysisJson.rejectionReasons?.[0],
+        metadata: {
+          policyRiskScore: analysisJson.policyRiskScore,
+          creativeQualityScore: analysisJson.creativeQualityScore,
+          issueCount: (analysisJson.issues ?? []).length,
+        },
+      });
+
       results.push({
         assetId: assetItem.id,
-        approved: analysisJson.approved ?? (analysisJson.policyRiskScore < 50),
+        approved,
         policyRiskScore: Math.min(100, Math.max(0, analysisJson.policyRiskScore ?? 30)),
         creativeQualityScore: Math.min(100, Math.max(0, analysisJson.creativeQualityScore ?? 70)),
         issues: analysisJson.issues ?? [],
@@ -194,7 +287,7 @@ Only include rejectionReasons for high or critical severity issues that warrant 
     }
 
   } catch (error) {
-    console.error("Error in analyze-asset function:", error);
+    console.error("[analyze-asset] Error:", error);
     return new Response(JSON.stringify({ 
       error: error instanceof Error ? error.message : "Analysis failed" 
     }), {
