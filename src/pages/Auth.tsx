@@ -18,16 +18,14 @@ export default function Auth() {
   const [signupPassword, setSignupPassword] = useState('');
   
   const navigate = useNavigate();
-  const { setUser } = useProjectStore();
+  const { setUser, ensureProject } = useProjectStore();
   const { toast } = useToast();
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsLoading(true);
     
-    // TODO: Replace with actual API call
     try {
-      // Simulated login - replace with real auth
       await new Promise(resolve => setTimeout(resolve, 1000));
       
       setUser({
@@ -36,12 +34,16 @@ export default function Auth() {
         name: loginEmail.split('@')[0],
       });
       
+      // Auto-create project silently
+      ensureProject();
+      
       toast({
         title: 'Welcome back!',
         description: 'You have successfully logged in.',
       });
       
-      navigate('/dashboard');
+      // Navigate directly to assets (campaign-first flow)
+      navigate('/assets');
     } catch (error) {
       toast({
         title: 'Error',
@@ -57,7 +59,6 @@ export default function Auth() {
     e.preventDefault();
     setIsLoading(true);
     
-    // TODO: Replace with actual API call
     try {
       await new Promise(resolve => setTimeout(resolve, 1000));
       
@@ -67,12 +68,16 @@ export default function Auth() {
         name: signupName,
       });
       
+      // Auto-create project silently
+      ensureProject();
+      
       toast({
         title: 'Account created!',
         description: 'Welcome to AdLaunch AI.',
       });
       
-      navigate('/projects/new');
+      // Navigate directly to assets (campaign-first flow)
+      navigate('/assets');
     } catch (error) {
       toast({
         title: 'Error',

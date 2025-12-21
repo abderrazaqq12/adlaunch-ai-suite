@@ -8,11 +8,8 @@ import { DashboardLayout } from "@/components/layout/DashboardLayout";
 
 // Pages
 import Auth from "./pages/Auth";
-import NewProject from "./pages/NewProject";
-import Dashboard from "./pages/Dashboard";
-import Connections from "./pages/Connections";
 import Assets from "./pages/Assets";
-import Analysis from "./pages/Analysis";
+import Connections from "./pages/Connections";
 import Launch from "./pages/Launch";
 import Rules from "./pages/Rules";
 import Monitoring from "./pages/Monitoring";
@@ -36,7 +33,8 @@ function AuthRoute({ children }: { children: React.ReactNode }) {
   const { user } = useProjectStore();
   
   if (user) {
-    return <Navigate to="/dashboard" replace />;
+    // Redirect to assets (campaign-first flow)
+    return <Navigate to="/assets" replace />;
   }
   
   return <>{children}</>;
@@ -59,16 +57,8 @@ const App = () => (
               </AuthRoute>
             }
           />
-          <Route
-            path="/projects/new"
-            element={
-              <ProtectedRoute>
-                <NewProject />
-              </ProtectedRoute>
-            }
-          />
 
-          {/* Protected dashboard routes */}
+          {/* Protected dashboard routes - campaign-first flow */}
           <Route
             element={
               <ProtectedRoute>
@@ -76,15 +66,16 @@ const App = () => (
               </ProtectedRoute>
             }
           >
-            <Route path="/dashboard" element={<Dashboard />} />
-            <Route path="/connections" element={<Connections />} />
             <Route path="/assets" element={<Assets />} />
-            <Route path="/analyze" element={<Analysis />} />
+            <Route path="/connections" element={<Connections />} />
             <Route path="/launch" element={<Launch />} />
             <Route path="/rules" element={<Rules />} />
             <Route path="/monitoring" element={<Monitoring />} />
             <Route path="/recovery" element={<Recovery />} />
             <Route path="/history" element={<History />} />
+            {/* Redirect old routes */}
+            <Route path="/dashboard" element={<Navigate to="/assets" replace />} />
+            <Route path="/analyze" element={<Navigate to="/assets" replace />} />
           </Route>
 
           {/* Catch-all */}

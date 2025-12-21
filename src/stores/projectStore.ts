@@ -26,11 +26,14 @@ interface ProjectState {
   // Auth actions
   setUser: (user: User | null) => void;
   
-  // Project actions
+  // Project actions (internal)
   setCurrentProject: (project: Project | null) => void;
   addProject: (project: Project) => void;
   updateProject: (id: string, updates: Partial<Project>) => void;
   updateProjectStage: (projectId: string, stage: ProjectStage) => void;
+  
+  // Auto-project: ensures a project exists, creates one silently if needed
+  ensureProject: () => Project;
   
   // Connection actions
   addConnection: (projectId: string, connection: AdAccountConnection) => void;
@@ -81,6 +84,18 @@ const getStageIndex = (stage: ProjectStage): number => {
   return STAGE_ORDER.indexOf(stage);
 };
 
+const createDefaultProject = (): Project => ({
+  id: `proj_${Date.now()}`,
+  name: 'My Ad Campaigns',
+  targetMarket: 'US',
+  language: 'en',
+  currency: 'USD',
+  defaultPlatforms: ['google', 'tiktok', 'snapchat'],
+  createdAt: new Date().toISOString(),
+  connections: [],
+  stage: 'SETUP',
+});
+
 export const useProjectStore = create<ProjectState>()(
   persist(
     (set, get) => ({
@@ -114,6 +129,33 @@ export const useProjectStore = create<ProjectState>()(
           ? { ...state.currentProject, stage }
           : state.currentProject,
       })),
+
+      // Auto-project creation: silently creates a project if none exists
+      ensureProject: () => {
+        const state = get();
+        
+        // If we already have a current project, return it
+        if (state.currentProject) {
+          return state.currentProject;
+        }
+        
+        // If we have any projects, set the first one as current
+        if (state.projects.length > 0) {
+          const project = state.projects[0];
+          set({ currentProject: project });
+          return project;
+        }
+        
+        // Create a new default project silently
+        const newProject = createDefaultProject();
+        
+        set({
+          projects: [newProject],
+          currentProject: newProject,
+        });
+        
+        return newProject;
+      },
       
       addConnection: (projectId, connection) => {
         set((state) => ({
@@ -174,11 +216,16 @@ export const useProjectStore = create<ProjectState>()(
       },
       
       addAsset: (asset) => {
-        const assetWithStatus: Asset = { ...asset, status: 'UPLOADED' };
+        const state = get();
+        // Auto-create project if needed
+        const project = state.ensureProject();
+        const assetWithStatus: Asset = { 
+          ...asset, 
+          status: 'UPLOADED',
+          projectId: asset.projectId || project.id,
+        };
         set((state) => ({ assets: [...state.assets, assetWithStatus] }));
-        if (asset.projectId) {
-          get().recalculateProjectStage(asset.projectId);
-        }
+        get().recalculateProjectStage(assetWithStatus.projectId);
       },
       
       removeAsset: (id) => {
@@ -224,12 +271,17 @@ export const useProjectStore = create<ProjectState>()(
       })),
       
       addCampaign: (campaign) => {
+        const state = get();
+        // Auto-create project if needed
+        const project = state.ensureProject();
+        const campaignWithProject = {
+          ...campaign,
+          projectId: campaign.projectId || project.id,
+        };
         set((state) => ({
-          campaigns: [...state.campaigns, campaign],
+          campaigns: [...state.campaigns, campaignWithProject],
         }));
-        if (campaign.projectId) {
-          get().updateProjectStage(campaign.projectId, 'LIVE');
-        }
+        get().updateProjectStage(campaignWithProject.projectId, 'LIVE');
       },
       
       updateCampaign: (id, updates) => set((state) => ({
@@ -262,7 +314,7 @@ export const useProjectStore = create<ProjectState>()(
         const state = get();
         const project = state.projects.find(p => p.id === projectId);
         
-        if (!project) return 'No project selected';
+        if (!project) return null; // No blocking - will auto-create
         
         const currentStageIndex = getStageIndex(project.stage);
         const requiredStageIndex = getStageIndex(requiredStage);
