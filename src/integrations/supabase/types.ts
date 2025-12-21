@@ -14,7 +14,450 @@ export type Database = {
   }
   public: {
     Tables: {
-      [_ in never]: never
+      ad_account_connections: {
+        Row: {
+          account_id: string
+          account_name: string
+          created_at: string
+          id: string
+          permissions: Json
+          platform: string
+          project_id: string
+          status: string
+          token_data: Json | null
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          account_id: string
+          account_name: string
+          created_at?: string
+          id?: string
+          permissions?: Json
+          platform: string
+          project_id: string
+          status?: string
+          token_data?: Json | null
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          account_id?: string
+          account_name?: string
+          created_at?: string
+          id?: string
+          permissions?: Json
+          platform?: string
+          project_id?: string
+          status?: string
+          token_data?: Json | null
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "ad_account_connections_project_id_fkey"
+            columns: ["project_id"]
+            isOneToOne: false
+            referencedRelation: "projects"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      assets: {
+        Row: {
+          analysis_result: Json | null
+          content: string | null
+          created_at: string
+          id: string
+          issues: Json | null
+          name: string
+          platform_compatibility: string[] | null
+          project_id: string
+          quality_score: number | null
+          rejection_reasons: Json | null
+          risk_score: number | null
+          state: string
+          type: string
+          updated_at: string
+          url: string | null
+          user_id: string
+        }
+        Insert: {
+          analysis_result?: Json | null
+          content?: string | null
+          created_at?: string
+          id?: string
+          issues?: Json | null
+          name: string
+          platform_compatibility?: string[] | null
+          project_id: string
+          quality_score?: number | null
+          rejection_reasons?: Json | null
+          risk_score?: number | null
+          state?: string
+          type: string
+          updated_at?: string
+          url?: string | null
+          user_id: string
+        }
+        Update: {
+          analysis_result?: Json | null
+          content?: string | null
+          created_at?: string
+          id?: string
+          issues?: Json | null
+          name?: string
+          platform_compatibility?: string[] | null
+          project_id?: string
+          quality_score?: number | null
+          rejection_reasons?: Json | null
+          risk_score?: number | null
+          state?: string
+          type?: string
+          updated_at?: string
+          url?: string | null
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "assets_project_id_fkey"
+            columns: ["project_id"]
+            isOneToOne: false
+            referencedRelation: "projects"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      automation_rules: {
+        Row: {
+          action: Json
+          actions_today: number | null
+          condition: Json
+          cooldown_ends_at: string | null
+          cooldown_minutes: number
+          created_at: string
+          id: string
+          last_triggered_at: string | null
+          name: string
+          project_id: string
+          scope: string
+          state: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          action: Json
+          actions_today?: number | null
+          condition: Json
+          cooldown_ends_at?: string | null
+          cooldown_minutes?: number
+          created_at?: string
+          id?: string
+          last_triggered_at?: string | null
+          name: string
+          project_id: string
+          scope?: string
+          state?: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          action?: Json
+          actions_today?: number | null
+          condition?: Json
+          cooldown_ends_at?: string | null
+          cooldown_minutes?: number
+          created_at?: string
+          id?: string
+          last_triggered_at?: string | null
+          name?: string
+          project_id?: string
+          scope?: string
+          state?: string
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "automation_rules_project_id_fkey"
+            columns: ["project_id"]
+            isOneToOne: false
+            referencedRelation: "projects"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      campaign_intents: {
+        Row: {
+          account_ids: string[]
+          asset_ids: string[]
+          audience: Json
+          budget: Json | null
+          created_at: string
+          errors: Json | null
+          id: string
+          name: string
+          objective: string
+          project_id: string
+          schedule: Json | null
+          state: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          account_ids?: string[]
+          asset_ids?: string[]
+          audience?: Json
+          budget?: Json | null
+          created_at?: string
+          errors?: Json | null
+          id?: string
+          name: string
+          objective?: string
+          project_id: string
+          schedule?: Json | null
+          state?: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          account_ids?: string[]
+          asset_ids?: string[]
+          audience?: Json
+          budget?: Json | null
+          created_at?: string
+          errors?: Json | null
+          id?: string
+          name?: string
+          objective?: string
+          project_id?: string
+          schedule?: Json | null
+          state?: string
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "campaign_intents_project_id_fkey"
+            columns: ["project_id"]
+            isOneToOne: false
+            referencedRelation: "projects"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      campaigns: {
+        Row: {
+          account_id: string | null
+          actions_today: number | null
+          budget_daily: number | null
+          budget_increased_today_percent: number | null
+          budget_total: number | null
+          clicks: number | null
+          conversions: number | null
+          created_at: string
+          first_spend_timestamp: string | null
+          id: string
+          impressions: number | null
+          intent_id: string | null
+          metrics: Json | null
+          name: string
+          objective: string
+          paused_by_user: boolean
+          platform: string
+          platform_campaign_id: string | null
+          project_id: string
+          spend: number | null
+          state: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          account_id?: string | null
+          actions_today?: number | null
+          budget_daily?: number | null
+          budget_increased_today_percent?: number | null
+          budget_total?: number | null
+          clicks?: number | null
+          conversions?: number | null
+          created_at?: string
+          first_spend_timestamp?: string | null
+          id?: string
+          impressions?: number | null
+          intent_id?: string | null
+          metrics?: Json | null
+          name: string
+          objective?: string
+          paused_by_user?: boolean
+          platform: string
+          platform_campaign_id?: string | null
+          project_id: string
+          spend?: number | null
+          state?: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          account_id?: string | null
+          actions_today?: number | null
+          budget_daily?: number | null
+          budget_increased_today_percent?: number | null
+          budget_total?: number | null
+          clicks?: number | null
+          conversions?: number | null
+          created_at?: string
+          first_spend_timestamp?: string | null
+          id?: string
+          impressions?: number | null
+          intent_id?: string | null
+          metrics?: Json | null
+          name?: string
+          objective?: string
+          paused_by_user?: boolean
+          platform?: string
+          platform_campaign_id?: string | null
+          project_id?: string
+          spend?: number | null
+          state?: string
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "campaigns_account_id_fkey"
+            columns: ["account_id"]
+            isOneToOne: false
+            referencedRelation: "ad_account_connections"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "campaigns_intent_id_fkey"
+            columns: ["intent_id"]
+            isOneToOne: false
+            referencedRelation: "campaign_intents"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "campaigns_project_id_fkey"
+            columns: ["project_id"]
+            isOneToOne: false
+            referencedRelation: "projects"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      events: {
+        Row: {
+          action: string | null
+          entity_id: string
+          entity_type: string
+          event_id: string
+          event_type: string
+          id: string
+          metadata: Json | null
+          new_state: string | null
+          previous_state: string | null
+          reason: string | null
+          source: string
+          timestamp: string
+          user_id: string
+        }
+        Insert: {
+          action?: string | null
+          entity_id: string
+          entity_type: string
+          event_id: string
+          event_type: string
+          id?: string
+          metadata?: Json | null
+          new_state?: string | null
+          previous_state?: string | null
+          reason?: string | null
+          source: string
+          timestamp?: string
+          user_id: string
+        }
+        Update: {
+          action?: string | null
+          entity_id?: string
+          entity_type?: string
+          event_id?: string
+          event_type?: string
+          id?: string
+          metadata?: Json | null
+          new_state?: string | null
+          previous_state?: string | null
+          reason?: string | null
+          source?: string
+          timestamp?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
+      profiles: {
+        Row: {
+          created_at: string
+          email: string | null
+          full_name: string | null
+          id: string
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          email?: string | null
+          full_name?: string | null
+          id: string
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          email?: string | null
+          full_name?: string | null
+          id?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      projects: {
+        Row: {
+          created_at: string
+          currency: string | null
+          default_platforms: string[] | null
+          id: string
+          language: string | null
+          name: string
+          stage: string
+          target_market: string | null
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          currency?: string | null
+          default_platforms?: string[] | null
+          id?: string
+          language?: string | null
+          name?: string
+          stage?: string
+          target_market?: string | null
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          currency?: string | null
+          default_platforms?: string[] | null
+          id?: string
+          language?: string | null
+          name?: string
+          stage?: string
+          target_market?: string | null
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
     }
     Views: {
       [_ in never]: never

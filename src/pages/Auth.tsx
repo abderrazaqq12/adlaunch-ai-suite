@@ -1,13 +1,19 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { useProjectStore } from '@/stores/projectStore';
 import { useToast } from '@/hooks/use-toast';
+import { useAuth } from '@/hooks/useAuth';
 import { Rocket, Mail, Lock, User } from 'lucide-react';
+import { z } from 'zod';
+
+// Validation schemas
+const emailSchema = z.string().email({ message: "Invalid email address" });
+const passwordSchema = z.string().min(6, { message: "Password must be at least 6 characters" });
+const nameSchema = z.string().min(1, { message: "Name is required" });
 
 export default function Auth() {
   const [isLoading, setIsLoading] = useState(false);
@@ -16,38 +22,95 @@ export default function Auth() {
   const [signupName, setSignupName] = useState('');
   const [signupEmail, setSignupEmail] = useState('');
   const [signupPassword, setSignupPassword] = useState('');
+  const [errors, setErrors] = useState<Record<string, string>>({});
   
   const navigate = useNavigate();
-  const { setUser, ensureProject } = useProjectStore();
   const { toast } = useToast();
+  const { user, loading, signIn, signUp } = useAuth();
+
+  // Redirect if already logged in
+  useEffect(() => {
+    if (!loading && user) {
+      navigate('/assets');
+    }
+  }, [user, loading, navigate]);
+
+  const validateLogin = () => {
+    const newErrors: Record<string, string> = {};
+    
+    const emailResult = emailSchema.safeParse(loginEmail);
+    if (!emailResult.success) {
+      newErrors.loginEmail = emailResult.error.errors[0].message;
+    }
+    
+    const passwordResult = passwordSchema.safeParse(loginPassword);
+    if (!passwordResult.success) {
+      newErrors.loginPassword = passwordResult.error.errors[0].message;
+    }
+    
+    setErrors(newErrors);
+    return Object.keys(newErrors).length === 0;
+  };
+
+  const validateSignup = () => {
+    const newErrors: Record<string, string> = {};
+    
+    const nameResult = nameSchema.safeParse(signupName);
+    if (!nameResult.success) {
+      newErrors.signupName = nameResult.error.errors[0].message;
+    }
+    
+    const emailResult = emailSchema.safeParse(signupEmail);
+    if (!emailResult.success) {
+      newErrors.signupEmail = emailResult.error.errors[0].message;
+    }
+    
+    const passwordResult = passwordSchema.safeParse(signupPassword);
+    if (!passwordResult.success) {
+      newErrors.signupPassword = passwordResult.error.errors[0].message;
+    }
+    
+    setErrors(newErrors);
+    return Object.keys(newErrors).length === 0;
+  };
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
+    setErrors({});
+    
+    if (!validateLogin()) return;
+    
     setIsLoading(true);
     
     try {
-      await new Promise(resolve => setTimeout(resolve, 1000));
+      const { error } = await signIn(loginEmail, loginPassword);
       
-      setUser({
-        id: '1',
-        email: loginEmail,
-        name: loginEmail.split('@')[0],
-      });
-      
-      // Auto-create project silently
-      ensureProject();
+      if (error) {
+        let message = 'Failed to login. Please try again.';
+        if (error.message.includes('Invalid login credentials')) {
+          message = 'Invalid email or password.';
+        } else if (error.message.includes('Email not confirmed')) {
+          message = 'Please confirm your email before logging in.';
+        }
+        
+        toast({
+          title: 'Login Error',
+          description: message,
+          variant: 'destructive',
+        });
+        return;
+      }
       
       toast({
         title: 'Welcome back!',
         description: 'You have successfully logged in.',
       });
       
-      // Navigate directly to assets (campaign-first flow)
       navigate('/assets');
     } catch (error) {
       toast({
         title: 'Error',
-        description: 'Failed to login. Please try again.',
+        description: 'An unexpected error occurred. Please try again.',
         variant: 'destructive',
       });
     } finally {
@@ -57,37 +120,62 @@ export default function Auth() {
 
   const handleSignup = async (e: React.FormEvent) => {
     e.preventDefault();
+    setErrors({});
+    
+    if (!validateSignup()) return;
+    
     setIsLoading(true);
     
     try {
-      await new Promise(resolve => setTimeout(resolve, 1000));
+      const { data, error } = await signUp(signupEmail, signupPassword, signupName);
       
-      setUser({
-        id: '1',
-        email: signupEmail,
-        name: signupName,
-      });
-      
-      // Auto-create project silently
-      ensureProject();
-      
-      toast({
-        title: 'Account created!',
-        description: 'Welcome to AdLaunch AI.',
-      });
-      
-      // Navigate directly to assets (campaign-first flow)
-      navigate('/assets');
+      if (error) {
+        let message = 'Failed to create account. Please try again.';
+        if (error.message.includes('User already registered')) {
+          message = 'An account with this email already exists. Please login instead.';
+        } else if (error.message.includes('Password')) {
+          message = error.message;
+        }
+        
+        toast({
+          title: 'Signup Error',
+          description: message,
+          variant: 'destructive',
+        });
+        return;
+      }
+
+      // Check if email confirmation is required
+      if (data.user && !data.session) {
+        toast({
+          title: 'Check your email',
+          description: 'We sent you a confirmation link. Please check your inbox.',
+        });
+      } else {
+        toast({
+          title: 'Account created!',
+          description: 'Welcome to AdLaunch AI.',
+        });
+        navigate('/assets');
+      }
     } catch (error) {
       toast({
         title: 'Error',
-        description: 'Failed to create account. Please try again.',
+        description: 'An unexpected error occurred. Please try again.',
         variant: 'destructive',
       });
     } finally {
       setIsLoading(false);
     }
   };
+
+  if (loading) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-background">
+        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
+      </div>
+    );
+  }
 
   return (
     <div className="flex min-h-screen items-center justify-center bg-background p-4">
@@ -130,6 +218,9 @@ export default function Auth() {
                       required
                     />
                   </div>
+                  {errors.loginEmail && (
+                    <p className="text-sm text-destructive">{errors.loginEmail}</p>
+                  )}
                 </div>
                 
                 <div className="space-y-2">
@@ -146,6 +237,9 @@ export default function Auth() {
                       required
                     />
                   </div>
+                  {errors.loginPassword && (
+                    <p className="text-sm text-destructive">{errors.loginPassword}</p>
+                  )}
                 </div>
                 
                 <Button type="submit" className="w-full" variant="glow" disabled={isLoading}>
@@ -170,6 +264,9 @@ export default function Auth() {
                       required
                     />
                   </div>
+                  {errors.signupName && (
+                    <p className="text-sm text-destructive">{errors.signupName}</p>
+                  )}
                 </div>
                 
                 <div className="space-y-2">
@@ -186,6 +283,9 @@ export default function Auth() {
                       required
                     />
                   </div>
+                  {errors.signupEmail && (
+                    <p className="text-sm text-destructive">{errors.signupEmail}</p>
+                  )}
                 </div>
                 
                 <div className="space-y-2">
@@ -202,6 +302,9 @@ export default function Auth() {
                       required
                     />
                   </div>
+                  {errors.signupPassword && (
+                    <p className="text-sm text-destructive">{errors.signupPassword}</p>
+                  )}
                 </div>
                 
                 <Button type="submit" className="w-full" variant="glow" disabled={isLoading}>
