@@ -328,36 +328,28 @@ function PlatformSection({ platform }: { platform: Platform }) {
 }
 
 export default function Connections() {
-  const { currentProject } = useProjectStore();
+  const { currentProject, ensureProject } = useProjectStore();
 
-  const totalConnections = currentProject?.connections.length || 0;
-  const launchableConnections = currentProject?.connections.filter(c => c.permissions.canLaunch).length || 0;
+  // Auto-ensure project exists
+  const project = currentProject || ensureProject();
+
+  const totalConnections = project?.connections.length || 0;
+  const launchableConnections = project?.connections.filter(c => c.permissions.canLaunch).length || 0;
+  const analyzeConnections = project?.connections.filter(c => c.permissions.canAnalyze).length || 0;
+  const optimizeConnections = project?.connections.filter(c => c.permissions.canOptimize).length || 0;
 
   return (
     <div className="space-y-8">
       {/* Header */}
       <div>
-        <h1 className="text-3xl font-bold text-foreground">Ad Account Connections</h1>
+        <h1 className="text-3xl font-bold text-foreground">Ad Accounts</h1>
         <p className="mt-1 text-muted-foreground">
-          Connect unlimited ad accounts per platform. Each account can have different permission levels.
+          Connect execution endpoints. Accounts are pipes for campaign delivery.
         </p>
       </div>
 
-      {/* No Project Warning */}
-      {!currentProject && (
-        <div className="flex items-center gap-3 rounded-lg border border-warning/20 bg-warning/5 p-4">
-          <AlertTriangle className="h-5 w-5 text-warning" />
-          <div>
-            <p className="font-medium text-foreground">No Project Selected</p>
-            <p className="text-sm text-muted-foreground">
-              Please create or select a project before connecting ad accounts.
-            </p>
-          </div>
-        </div>
-      )}
-
       {/* Summary Stats */}
-      {currentProject && totalConnections > 0 && (
+      {totalConnections > 0 && (
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
           <Card className="border-border bg-card">
             <CardContent className="p-4">
@@ -365,26 +357,31 @@ export default function Connections() {
               <p className="text-2xl font-bold text-foreground">{totalConnections}</p>
             </CardContent>
           </Card>
-          <Card className="border-border bg-card">
+          <Card className="border-success/20 bg-success/5">
             <CardContent className="p-4">
-              <p className="text-sm text-muted-foreground">Launch Enabled</p>
-              <p className="text-2xl font-bold text-success">{launchableConnections}</p>
+              <div className="flex items-center gap-2">
+                <Check className="h-4 w-4 text-success" />
+                <p className="text-sm text-muted-foreground">Can Analyze</p>
+              </div>
+              <p className="text-2xl font-bold text-success">{analyzeConnections}</p>
             </CardContent>
           </Card>
-          <Card className="border-border bg-card">
+          <Card className="border-primary/20 bg-primary/5">
             <CardContent className="p-4">
-              <p className="text-sm text-muted-foreground">Limited Access</p>
-              <p className="text-2xl font-bold text-warning">
-                {totalConnections - launchableConnections}
-              </p>
+              <div className="flex items-center gap-2">
+                <Check className="h-4 w-4 text-primary" />
+                <p className="text-sm text-muted-foreground">Can Launch</p>
+              </div>
+              <p className="text-2xl font-bold text-primary">{launchableConnections}</p>
             </CardContent>
           </Card>
-          <Card className="border-border bg-card">
+          <Card className="border-accent/20 bg-accent/5">
             <CardContent className="p-4">
-              <p className="text-sm text-muted-foreground">Platforms</p>
-              <p className="text-2xl font-bold text-foreground">
-                {new Set(currentProject?.connections.map(c => c.platform)).size}
-              </p>
+              <div className="flex items-center gap-2">
+                <Check className="h-4 w-4 text-accent-foreground" />
+                <p className="text-sm text-muted-foreground">Can Optimize</p>
+              </div>
+              <p className="text-2xl font-bold text-accent-foreground">{optimizeConnections}</p>
             </CardContent>
           </Card>
         </div>
@@ -396,44 +393,6 @@ export default function Connections() {
         <PlatformSection platform="tiktok" />
         <PlatformSection platform="snapchat" />
       </div>
-
-      {/* Help Section */}
-      <Card className="border-border bg-card">
-        <CardHeader>
-          <CardTitle>Understanding Permissions</CardTitle>
-          <CardDescription>
-            Each ad account has its own permission level based on your access role
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="grid gap-6 md:grid-cols-3">
-            <div>
-              <h4 className="font-medium text-foreground">Can Analyze</h4>
-              <p className="mt-1 text-sm text-muted-foreground">
-                Review ads for policy compliance and creative quality before launch.
-              </p>
-            </div>
-            <div>
-              <h4 className="font-medium text-foreground">Can Launch</h4>
-              <p className="mt-1 text-sm text-muted-foreground">
-                Create campaigns and deploy ads directly. Requires elevated access.
-              </p>
-            </div>
-            <div>
-              <h4 className="font-medium text-foreground">Can Optimize</h4>
-              <p className="mt-1 text-sm text-muted-foreground">
-                AI-driven budget adjustments and bid optimization. Requires full access.
-              </p>
-            </div>
-          </div>
-          <Button variant="outline" asChild>
-            <a href="https://docs.adlaunch.ai/connections" target="_blank" rel="noopener noreferrer">
-              <ExternalLink className="mr-2 h-4 w-4" />
-              View Documentation
-            </a>
-          </Button>
-        </CardContent>
-      </Card>
     </div>
   );
 }

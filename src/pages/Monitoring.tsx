@@ -20,13 +20,11 @@ import {
   Target, 
   TrendingUp,
   Pause,
-  Play,
   RefreshCw,
   Bot,
   Clock,
   Layers,
   Calendar,
-  ChevronRight,
   Loader2,
   AlertCircle,
 } from 'lucide-react';
@@ -38,47 +36,8 @@ interface CampaignWithExecution extends Campaign {
   platformError?: string;
 }
 
-function CampaignCard({ campaign, onPauseResume }: { campaign: CampaignWithExecution; onPauseResume: () => void }) {
-  const [isPausing, setIsPausing] = useState(false);
-  const { currentProject } = useProjectStore();
-  const { toast } = useToast();
-
-  const handlePauseResume = async () => {
-    if (!currentProject) return;
-    
-    setIsPausing(true);
-    
-    try {
-      const newStatus = campaign.status === 'paused' ? 'resume' : 'pause';
-      
-      await brainClient.memoryWrite(currentProject.id, {
-        platform: campaign.platform,
-        accountId: campaign.accountId,
-        event: newStatus as 'pause' | 'resume',
-        details: {
-          campaignId: campaign.id,
-          previousStatus: campaign.status,
-        },
-      });
-
-      onPauseResume();
-      
-      toast({
-        title: campaign.status === 'paused' ? 'Campaign Resumed' : 'Campaign Paused',
-        description: `${campaign.name} has been ${campaign.status === 'paused' ? 'resumed' : 'paused'}.`,
-      });
-    } catch (err) {
-      const message = err instanceof BrainClientError ? err.message : 'Failed to update campaign';
-      toast({
-        title: 'Action Failed',
-        description: message,
-        variant: 'destructive',
-      });
-    } finally {
-      setIsPausing(false);
-    }
-  };
-
+// Read-only campaign card - no manual controls
+function CampaignCard({ campaign }: { campaign: CampaignWithExecution }) {
   // Derive execution status from campaign status for display
   const getExecutionStatus = (): RealExecutionStatus | null => {
     if (campaign.executionStatus) return campaign.executionStatus;
@@ -102,26 +61,20 @@ function CampaignCard({ campaign, onPauseResume }: { campaign: CampaignWithExecu
           </div>
           <CardTitle className="text-lg">{campaign.name}</CardTitle>
         </div>
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={handlePauseResume}
-          disabled={isPausing || executionStatus === 'EXECUTION_FAILED'}
-        >
-          {campaign.status === 'paused' ? (
-            <>
-              <Play className="mr-2 h-4 w-4" />
-              Resume
-            </>
-          ) : (
-            <>
-              <Pause className="mr-2 h-4 w-4" />
-              Pause
-            </>
-          )}
-        </Button>
+        {/* Status indicator - read only */}
+        <div className={cn(
+          "flex items-center gap-2 rounded-lg px-3 py-1.5 text-sm font-medium",
+          campaign.status === 'active' ? 'bg-success/10 text-success' :
+          campaign.status === 'paused' ? 'bg-warning/10 text-warning' :
+          'bg-muted text-muted-foreground'
+        )}>
+          {campaign.status === 'active' && <Activity className="h-4 w-4" />}
+          {campaign.status === 'paused' && <Pause className="h-4 w-4" />}
+          <span className="capitalize">{campaign.status}</span>
+        </div>
       </CardHeader>
       <CardContent>
+        {/* Performance Metrics */}
         <div className="grid grid-cols-4 gap-4">
           <div className="space-y-1">
             <p className="text-xs text-muted-foreground">Spend</p>
@@ -130,15 +83,15 @@ function CampaignCard({ campaign, onPauseResume }: { campaign: CampaignWithExecu
             </p>
           </div>
           <div className="space-y-1">
-            <p className="text-xs text-muted-foreground">CPC</p>
+            <p className="text-xs text-muted-foreground">Clicks</p>
             <p className="text-lg font-semibold text-foreground">
-              ${campaign.metrics.cpc.toFixed(2)}
+              {campaign.metrics.clicks.toLocaleString()}
             </p>
           </div>
           <div className="space-y-1">
-            <p className="text-xs text-muted-foreground">CTR</p>
+            <p className="text-xs text-muted-foreground">Conversions</p>
             <p className="text-lg font-semibold text-foreground">
-              {campaign.metrics.ctr.toFixed(2)}%
+              {campaign.metrics.conversions.toLocaleString()}
             </p>
           </div>
           <div className="space-y-1">
@@ -157,22 +110,7 @@ function CampaignCard({ campaign, onPauseResume }: { campaign: CampaignWithExecu
               <div>
                 <p className="text-sm font-medium text-destructive">Execution Failed</p>
                 <p className="text-sm text-destructive/80">
-                  {campaign.platformError || 'Failed to create campaign in ad platform. Check account permissions and try again.'}
-                </p>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* Execution Blocked Error */}
-        {executionStatus === 'EXECUTION_BLOCKED' && !campaign.platformError && (
-          <div className="mt-4 rounded-lg border border-warning/20 bg-warning/5 p-3">
-            <div className="flex items-start gap-2">
-              <AlertCircle className="h-4 w-4 text-warning mt-0.5 shrink-0" />
-              <div>
-                <p className="text-sm font-medium text-warning">Blocked by Platform</p>
-                <p className="text-sm text-warning/80">
-                  This campaign was blocked by the ad platform's policies.
+                  {campaign.platformError || 'Failed to create campaign in ad platform.'}
                 </p>
               </div>
             </div>
@@ -413,11 +351,6 @@ function MonitoringContent() {
     });
   };
 
-  const handlePauseResume = () => {
-    // Trigger refresh after pause/resume
-    fetchOptimizations();
-  };
-
   return (
     <div className="space-y-8">
       {/* Header */}
@@ -477,7 +410,6 @@ function MonitoringContent() {
                 <CampaignCard 
                   key={campaign.id} 
                   campaign={campaign} 
-                  onPauseResume={handlePauseResume}
                 />
               ))}
             </div>
