@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -21,6 +21,12 @@ import { brainClient, BrainClientError } from '@/lib/api';
 import { MultiSelectCombobox } from '@/components/ui/multi-select-combobox';
 import { COUNTRIES } from '@/lib/data/countries';
 import { LANGUAGES } from '@/lib/data/languages';
+import {
+  guardBudget,
+  getMinimumBudget,
+  collectPublishBlockers,
+  PLATFORM_MINIMUM_BUDGETS,
+} from '@/lib/guards';
 import type { 
   Platform, 
   Campaign, 
@@ -50,6 +56,7 @@ import {
   CheckCircle2,
   Lock,
   AlertCircle,
+  Info,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
@@ -156,6 +163,8 @@ function LaunchContent() {
     languages: ['en'],
   });
   const [dailyBudget, setDailyBudget] = useState('100');
+  const [budgetError, setBudgetError] = useState<string | null>(null);
+  const [budgetWarning, setBudgetWarning] = useState<string | null>(null);
   const [softLaunch, setSoftLaunch] = useState(true);
 
   // Platform & Account selection
@@ -187,6 +196,61 @@ function LaunchContent() {
     assets.filter(a => a.projectId === currentProject?.id && a.status === 'READY_FOR_LAUNCH'),
     [assets, currentProject?.id]
   );
+
+  // Budget validation with guards
+  const validateBudget = useCallback((value: string, platforms: Platform[]) => {
+    const numericBudget = parseFloat(value) || 0;
+    const result = guardBudget({ dailyBudget: numericBudget, selectedPlatforms: platforms });
+    
+    if (!result.allowed) {
+      setBudgetError(result.reason || 'Invalid budget');
+      setBudgetWarning(null);
+    } else if (result.severity === 'warning') {
+      setBudgetError(null);
+      setBudgetWarning(result.reason || null);
+    } else {
+      setBudgetError(null);
+      setBudgetWarning(null);
+    }
+    
+    return result;
+  }, []);
+
+  // Minimum budget based on selected platforms
+  const minimumBudget = useMemo(() => getMinimumBudget(selectedPlatforms), [selectedPlatforms]);
+
+  // Collect all publish blockers for preview step
+  const publishBlockers = useMemo(() => {
+    const selectedAccounts = accountSelections.flatMap(s => {
+      return currentProject?.connections
+        .filter(c => s.accountIds.includes(c.id))
+        .map(c => ({
+          id: c.id,
+          permissions: c.permissions,
+          platform: c.platform as Platform,
+        })) || [];
+    });
+
+    return collectPublishBlockers({
+      assets: readyAssets.filter(a => selectedAssetIds.includes(a.id)).map(a => ({
+        id: a.id,
+        state: a.status,
+        riskScore: a.analysisResult?.policyRiskScore,
+      })),
+      accounts: selectedAccounts,
+      audience: {
+        countries: audience.countries,
+        languages: audience.languages,
+      },
+      campaignName,
+      landingPageUrl,
+      dailyBudget: parseFloat(dailyBudget) || 0,
+      selectedPlatforms,
+    });
+  }, [readyAssets, selectedAssetIds, accountSelections, currentProject?.connections, audience, campaignName, landingPageUrl, dailyBudget, selectedPlatforms]);
+
+  // Has any blocking errors
+  const hasBlockingErrors = publishBlockers.some(b => b.severity === 'error');
 
   // State Machine: Compute current publish flow state
   const publishFlowValidation = usePublishFlowState({
@@ -223,17 +287,28 @@ function LaunchContent() {
       return;
     }
 
+    let newPlatforms: Platform[];
     if (selectedPlatforms.includes(platform)) {
-      setSelectedPlatforms(prev => prev.filter(p => p !== platform));
+      newPlatforms = selectedPlatforms.filter(p => p !== platform);
+      setSelectedPlatforms(newPlatforms);
       setAccountSelections(prev => prev.filter(s => s.platform !== platform));
     } else {
-      setSelectedPlatforms(prev => [...prev, platform]);
+      newPlatforms = [...selectedPlatforms, platform];
+      setSelectedPlatforms(newPlatforms);
       // Auto-select all launchable accounts
       setAccountSelections(prev => [
         ...prev.filter(s => s.platform !== platform),
         { platform, accountIds: accounts.map(a => a.id) }
       ]);
     }
+    
+    // Re-validate budget with new platforms
+    validateBudget(dailyBudget, newPlatforms);
+  };
+
+  const handleBudgetChange = (value: string) => {
+    setDailyBudget(value);
+    validateBudget(value, selectedPlatforms);
   };
 
   const toggleAccount = (platform: Platform, accountId: string) => {
@@ -715,18 +790,46 @@ function LaunchContent() {
           </div>
 
           <div className="space-y-2">
-            <Label htmlFor="budget">Daily Budget</Label>
+            <Label htmlFor="budget">
+              Daily Budget *
+              {selectedPlatforms.length > 0 && (
+                <span className="ml-2 text-xs text-muted-foreground font-normal">
+                  (min ${minimumBudget} for {selectedPlatforms.join(', ')})
+                </span>
+              )}
+            </Label>
             <div className="relative">
               <DollarSign className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
               <Input
                 id="budget"
                 type="number"
-                placeholder="100"
+                min={minimumBudget}
+                step="1"
+                placeholder={String(minimumBudget)}
                 value={dailyBudget}
-                onChange={(e) => setDailyBudget(e.target.value)}
-                className="pl-10"
+                onChange={(e) => handleBudgetChange(e.target.value)}
+                className={cn("pl-10", budgetError && "border-destructive")}
               />
             </div>
+            {budgetError && (
+              <p className="text-sm text-destructive flex items-center gap-1">
+                <AlertCircle className="h-3 w-3" />
+                {budgetError}
+              </p>
+            )}
+            {budgetWarning && !budgetError && (
+              <p className="text-sm text-warning flex items-center gap-1">
+                <Info className="h-3 w-3" />
+                {budgetWarning}
+              </p>
+            )}
+            {selectedPlatforms.length > 0 && !budgetError && !budgetWarning && (
+              <p className="text-xs text-muted-foreground">
+                Platform minimums: {selectedPlatforms.map(p => 
+                  `${p.charAt(0).toUpperCase() + p.slice(1)}: $${PLATFORM_MINIMUM_BUDGETS[p]}`
+                ).join(' • ')}
+              </p>
+            )}
           </div>
         </CardContent>
       </Card>
@@ -972,6 +1075,55 @@ function LaunchContent() {
         </CardContent>
       </Card>
 
+      {/* Validation Blockers */}
+      {publishBlockers.length > 0 && (
+        <Card className={cn(
+          "border",
+          hasBlockingErrors ? "border-destructive/50 bg-destructive/5" : "border-warning/50 bg-warning/5"
+        )}>
+          <CardHeader className="pb-2">
+            <CardTitle className={cn(
+              "flex items-center gap-2 text-base",
+              hasBlockingErrors ? "text-destructive" : "text-warning"
+            )}>
+              {hasBlockingErrors ? (
+                <>
+                  <AlertCircle className="h-5 w-5" />
+                  Issues Blocking Launch
+                </>
+              ) : (
+                <>
+                  <Info className="h-5 w-5" />
+                  Warnings
+                </>
+              )}
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="pt-0">
+            <ul className="space-y-2">
+              {publishBlockers.map((blocker, index) => (
+                <li 
+                  key={index} 
+                  className={cn(
+                    "flex items-start gap-2 text-sm",
+                    blocker.severity === 'error' ? "text-destructive" : "text-warning"
+                  )}
+                >
+                  {blocker.severity === 'error' ? (
+                    <AlertCircle className="h-4 w-4 mt-0.5 shrink-0" />
+                  ) : (
+                    <Info className="h-4 w-4 mt-0.5 shrink-0" />
+                  )}
+                  <span>
+                    <strong className="capitalize">{blocker.field}:</strong> {blocker.message}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          </CardContent>
+        </Card>
+      )}
+
       {/* Execution Readiness */}
       <ExecutionReadinessPanel readiness={executionReadiness} />
     </div>
@@ -1037,9 +1189,14 @@ function LaunchContent() {
             variant="glow" 
             size="lg"
             onClick={handleLaunchClick}
-            disabled={isLaunching || !executionReadiness.canLaunch || executionReadiness.totalCampaignsReady === 0 || isDuplicateLaunch()}
+            disabled={isLaunching || !executionReadiness.canLaunch || executionReadiness.totalCampaignsReady === 0 || isDuplicateLaunch() || hasBlockingErrors}
           >
-            {isDuplicateLaunch() ? (
+            {hasBlockingErrors ? (
+              <>
+                <Lock className="mr-2 h-5 w-5" />
+                Fix Issues to Launch
+              </>
+            ) : isDuplicateLaunch() ? (
               <>
                 <AlertTriangle className="mr-2 h-5 w-5" />
                 Already Launched
