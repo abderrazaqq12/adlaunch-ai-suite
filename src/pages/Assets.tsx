@@ -9,7 +9,9 @@ import { useProjectStore } from '@/stores/projectStore';
 import { useToast } from '@/hooks/use-toast';
 import { ProjectGate } from '@/components/common/ProjectGate';
 import { AssetStatusBadge } from '@/components/common/AssetStatusBadge';
+import { brainClient, BrainClientError } from '@/lib/api';
 import type { Asset } from '@/types';
+import type { ComplianceIssue } from '@/lib/api';
 import { 
   Upload, 
   Video, 
@@ -22,6 +24,8 @@ import {
   CheckCircle2,
   XCircle,
   Eye,
+  AlertTriangle,
+  Shield,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import {
@@ -31,6 +35,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
+import { Progress } from '@/components/ui/progress';
 
 function AssetsContent() {
   const [activeTab, setActiveTab] = useState('videos');
@@ -38,6 +43,9 @@ function AssetsContent() {
   const [analyzingAssets, setAnalyzingAssets] = useState<Set<string>>(new Set());
   const [showRejectionDialog, setShowRejectionDialog] = useState(false);
   const [selectedAssetForRejection, setSelectedAssetForRejection] = useState<Asset | null>(null);
+  const [complianceIssues, setComplianceIssues] = useState<ComplianceIssue[]>([]);
+  const [isAnalyzingAll, setIsAnalyzingAll] = useState(false);
+  const [analysisProgress, setAnalysisProgress] = useState(0);
   
   const { assets, addAsset, removeAsset, updateAsset, currentProject } = useProjectStore();
   const { toast } = useToast();
@@ -92,66 +100,89 @@ function AssetsContent() {
   };
 
   const handleRunAnalysis = async (assetId: string) => {
-    setAnalyzingAssets(prev => new Set([...prev, assetId]));
-
-    // Simulate AI analysis
-    await new Promise(resolve => setTimeout(resolve, 2000));
-
+    if (!currentProject) return;
+    
     const asset = assets.find(a => a.id === assetId);
     if (!asset) return;
 
-    // Simulate AI decision (80% approval rate)
-    const isApproved = Math.random() > 0.2;
-    
-    if (isApproved) {
-      updateAsset(assetId, { 
-        status: 'APPROVED',
-        analysisResult: {
-          policyRiskScore: Math.floor(Math.random() * 20),
-          creativeQualityScore: 70 + Math.floor(Math.random() * 30),
-          passed: true,
-          analyzedAt: new Date().toISOString(),
-          issues: [],
-        },
-      });
-      toast({
-        title: 'Asset Approved',
-        description: `${asset.name} passed AI compliance check.`,
-      });
-    } else {
-      const rejectionReasons = [
-        'Text overlay exceeds 20% of video frame',
-        'Audio contains copyrighted music',
-        'Misleading claims detected',
-        'Prohibited product category detected',
-      ].slice(0, 1 + Math.floor(Math.random() * 2));
+    setAnalyzingAssets(prev => new Set([...prev, assetId]));
 
-      updateAsset(assetId, { 
-        status: 'RISKY',
-        rejectionReasons,
-        analysisResult: {
-          policyRiskScore: 60 + Math.floor(Math.random() * 40),
-          creativeQualityScore: 30 + Math.floor(Math.random() * 40),
-          passed: false,
-          analyzedAt: new Date().toISOString(),
-          issues: rejectionReasons.map(r => ({ severity: 'high' as const, message: r, platform: 'google' as const })),
+    try {
+      // Call the Brain API compliance engine
+      const result = await brainClient.analyzeAsset(currentProject.id, {
+        asset: {
+          id: asset.id,
+          type: asset.type,
+          name: asset.name,
+          url: asset.url,
+          content: asset.content,
         },
       });
+
+      if (result.approved) {
+        updateAsset(assetId, { 
+          status: 'APPROVED',
+          analysisResult: {
+            policyRiskScore: result.policyRiskScore,
+            creativeQualityScore: result.creativeQualityScore,
+            passed: true,
+            analyzedAt: result.analyzedAt,
+            issues: result.issues.map(i => ({ 
+              severity: i.severity, 
+              message: i.message, 
+              platform: 'google' as const 
+            })),
+          },
+          rejectionReasons: [],
+        });
+        toast({
+          title: 'Asset Approved',
+          description: `${asset.name} passed AI compliance check.`,
+        });
+      } else {
+        updateAsset(assetId, { 
+          status: 'RISKY',
+          rejectionReasons: result.rejectionReasons,
+          analysisResult: {
+            policyRiskScore: result.policyRiskScore,
+            creativeQualityScore: result.creativeQualityScore,
+            passed: false,
+            analyzedAt: result.analyzedAt,
+            issues: result.issues.map(i => ({ 
+              severity: i.severity, 
+              message: i.message, 
+              platform: 'google' as const 
+            })),
+          },
+        });
+        toast({
+          title: 'Asset Blocked',
+          description: `${asset.name} failed compliance check. ${result.rejectionReasons.length} issue(s) found.`,
+          variant: 'destructive',
+        });
+      }
+    } catch (error) {
+      const message = error instanceof BrainClientError 
+        ? error.message 
+        : 'Failed to analyze asset. Please try again.';
+      
       toast({
-        title: 'Asset Blocked',
-        description: `${asset.name} failed compliance check.`,
+        title: 'Analysis Failed',
+        description: message,
         variant: 'destructive',
       });
+    } finally {
+      setAnalyzingAssets(prev => {
+        const next = new Set(prev);
+        next.delete(assetId);
+        return next;
+      });
     }
-
-    setAnalyzingAssets(prev => {
-      const next = new Set(prev);
-      next.delete(assetId);
-      return next;
-    });
   };
 
   const handleAnalyzeAll = async () => {
+    if (!currentProject) return;
+    
     const unanalyzedAssets = projectAssets.filter(a => a.status === 'UPLOADED');
     if (unanalyzedAssets.length === 0) {
       toast({
@@ -161,19 +192,112 @@ function AssetsContent() {
       return;
     }
 
-    toast({
-      title: 'Running AI Analysis',
-      description: `Analyzing ${unanalyzedAssets.length} asset(s)...`,
-    });
+    setIsAnalyzingAll(true);
+    setAnalysisProgress(0);
 
-    for (const asset of unanalyzedAssets) {
-      await handleRunAnalysis(asset.id);
+    try {
+      // Call the batch analysis endpoint
+      const result = await brainClient.analyzeAssetBatch(currentProject.id, {
+        assets: unanalyzedAssets.map(a => ({
+          id: a.id,
+          type: a.type,
+          name: a.name,
+          url: a.url,
+          content: a.content,
+        })),
+      });
+
+      // Update each asset with results
+      for (let i = 0; i < result.results.length; i++) {
+        const analysisResult = result.results[i];
+        const asset = unanalyzedAssets.find(a => a.id === analysisResult.assetId);
+        
+        if (asset) {
+          updateAsset(analysisResult.assetId, { 
+            status: analysisResult.approved ? 'APPROVED' : 'RISKY',
+            rejectionReasons: analysisResult.rejectionReasons,
+            analysisResult: {
+              policyRiskScore: analysisResult.policyRiskScore,
+              creativeQualityScore: analysisResult.creativeQualityScore,
+              passed: analysisResult.approved,
+              analyzedAt: analysisResult.analyzedAt,
+              issues: analysisResult.issues.map(issue => ({ 
+                severity: issue.severity, 
+                message: issue.message, 
+                platform: 'google' as const 
+              })),
+            },
+          });
+        }
+        
+        setAnalysisProgress(((i + 1) / result.results.length) * 100);
+      }
+
+      toast({
+        title: 'Analysis Complete',
+        description: `${result.summary.approved} approved, ${result.summary.rejected} blocked out of ${result.summary.total} assets.`,
+        variant: result.summary.rejected > 0 ? 'default' : 'default',
+      });
+    } catch (error) {
+      const message = error instanceof BrainClientError 
+        ? error.message 
+        : 'Failed to analyze assets. Please try again.';
+      
+      toast({
+        title: 'Batch Analysis Failed',
+        description: message,
+        variant: 'destructive',
+      });
+    } finally {
+      setIsAnalyzingAll(false);
+      setAnalysisProgress(0);
     }
   };
 
-  const handleViewRejection = (asset: Asset) => {
+  const handleViewRejection = async (asset: Asset) => {
+    if (!currentProject) return;
+    
     setSelectedAssetForRejection(asset);
+    
+    // If we have analysis result with issues, use those
+    if (asset.analysisResult?.issues && asset.analysisResult.issues.length > 0) {
+      setComplianceIssues(asset.analysisResult.issues.map(i => ({
+        severity: i.severity,
+        category: 'policy' as const,
+        message: i.message,
+      })));
+    } else {
+      // Otherwise use rejection reasons as issues
+      setComplianceIssues((asset.rejectionReasons || []).map(reason => ({
+        severity: 'high' as const,
+        category: 'policy' as const,
+        message: reason,
+      })));
+    }
+    
     setShowRejectionDialog(true);
+  };
+
+  const getSeverityColor = (severity: string) => {
+    switch (severity) {
+      case 'critical': return 'text-destructive bg-destructive/10 border-destructive/20';
+      case 'high': return 'text-destructive bg-destructive/10 border-destructive/20';
+      case 'medium': return 'text-warning bg-warning/10 border-warning/20';
+      case 'low': return 'text-muted-foreground bg-muted border-border';
+      default: return 'text-muted-foreground bg-muted border-border';
+    }
+  };
+
+  const getSeverityIcon = (severity: string) => {
+    switch (severity) {
+      case 'critical':
+      case 'high':
+        return <XCircle className="h-4 w-4" />;
+      case 'medium':
+        return <AlertTriangle className="h-4 w-4" />;
+      default:
+        return <AlertCircle className="h-4 w-4" />;
+    }
   };
 
   const renderAssetCard = (asset: Asset) => {
@@ -207,6 +331,32 @@ function AssetsContent() {
                 <AssetStatusBadge status={asset.status} size="sm" />
               </div>
               
+              {/* Analysis Scores */}
+              {asset.analysisResult && (
+                <div className="flex gap-3 mb-3 text-xs">
+                  <div className="flex items-center gap-1">
+                    <Shield className="h-3 w-3 text-muted-foreground" />
+                    <span className={cn(
+                      "font-medium",
+                      asset.analysisResult.policyRiskScore < 30 ? "text-success" :
+                      asset.analysisResult.policyRiskScore < 60 ? "text-warning" : "text-destructive"
+                    )}>
+                      Risk: {asset.analysisResult.policyRiskScore}%
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-1">
+                    <Sparkles className="h-3 w-3 text-muted-foreground" />
+                    <span className={cn(
+                      "font-medium",
+                      asset.analysisResult.creativeQualityScore > 70 ? "text-success" :
+                      asset.analysisResult.creativeQualityScore > 50 ? "text-warning" : "text-destructive"
+                    )}>
+                      Quality: {asset.analysisResult.creativeQualityScore}%
+                    </span>
+                  </div>
+                </div>
+              )}
+              
               {/* AI Analysis Controls */}
               <div className="flex flex-wrap gap-2 mt-3">
                 {needsAnalysis && (
@@ -225,7 +375,7 @@ function AssetsContent() {
                     ) : (
                       <>
                         <Sparkles className="h-3.5 w-3.5" />
-                        Run AI Analysis
+                        Run AI Compliance
                       </>
                     )}
                   </Button>
@@ -240,7 +390,7 @@ function AssetsContent() {
                       className="gap-1.5 text-destructive hover:text-destructive"
                     >
                       <Eye className="h-3.5 w-3.5" />
-                      View Rejection
+                      View Issues ({asset.rejectionReasons?.length || 0})
                     </Button>
                     <Button
                       size="sm"
@@ -288,16 +438,45 @@ function AssetsContent() {
         <div>
           <h1 className="text-3xl font-bold text-foreground">Asset Manager</h1>
           <p className="mt-1 text-muted-foreground">
-            Upload assets and let AI analyze them for compliance.
+            Upload assets and let AI analyze them for platform compliance.
           </p>
         </div>
         {pendingCount > 0 && (
-          <Button onClick={handleAnalyzeAll} className="gap-2">
-            <Sparkles className="h-4 w-4" />
-            Analyze All ({pendingCount})
+          <Button 
+            onClick={handleAnalyzeAll} 
+            className="gap-2"
+            disabled={isAnalyzingAll}
+          >
+            {isAnalyzingAll ? (
+              <>
+                <RefreshCw className="h-4 w-4 animate-spin" />
+                Analyzing...
+              </>
+            ) : (
+              <>
+                <Sparkles className="h-4 w-4" />
+                Analyze All ({pendingCount})
+              </>
+            )}
           </Button>
         )}
       </div>
+
+      {/* Analysis Progress */}
+      {isAnalyzingAll && (
+        <Card className="border-primary/20 bg-primary/5">
+          <CardContent className="p-4">
+            <div className="flex items-center gap-3 mb-2">
+              <RefreshCw className="h-5 w-5 animate-spin text-primary" />
+              <p className="font-medium text-foreground">AI Compliance Analysis in Progress</p>
+            </div>
+            <Progress value={analysisProgress} className="h-2" />
+            <p className="text-sm text-muted-foreground mt-2">
+              {Math.round(analysisProgress)}% complete
+            </p>
+          </CardContent>
+        </Card>
+      )}
 
       {/* Stats */}
       {projectAssets.length > 0 && (
@@ -309,7 +488,7 @@ function AssetsContent() {
               </div>
               <div>
                 <p className="text-2xl font-bold text-success">{approvedCount}</p>
-                <p className="text-sm text-muted-foreground">Approved</p>
+                <p className="text-sm text-muted-foreground">AI Approved</p>
               </div>
             </CardContent>
           </Card>
@@ -357,7 +536,7 @@ function AssetsContent() {
             <CardHeader>
               <CardTitle>Upload Video Ads</CardTitle>
               <CardDescription>
-                Upload videos. AI will analyze for platform compliance automatically.
+                Upload videos. AI will analyze for platform compliance.
               </CardDescription>
             </CardHeader>
             <CardContent>
@@ -432,6 +611,11 @@ function AssetsContent() {
                     <div className="flex-1">
                       <div className="flex items-center gap-2 mb-2 flex-wrap">
                         <AssetStatusBadge status={asset.status} size="sm" />
+                        {asset.analysisResult && (
+                          <span className="text-xs text-muted-foreground">
+                            Risk: {asset.analysisResult.policyRiskScore}% • Quality: {asset.analysisResult.creativeQualityScore}%
+                          </span>
+                        )}
                       </div>
                       <p className="text-foreground">{asset.content}</p>
                       
@@ -453,7 +637,7 @@ function AssetsContent() {
                             ) : (
                               <>
                                 <Sparkles className="h-3.5 w-3.5" />
-                                Run AI Analysis
+                                Run AI Compliance
                               </>
                             )}
                           </Button>
@@ -468,7 +652,7 @@ function AssetsContent() {
                               className="gap-1.5 text-destructive hover:text-destructive"
                             >
                               <Eye className="h-3.5 w-3.5" />
-                              View Rejection
+                              View Issues
                             </Button>
                             <Button
                               size="sm"
@@ -507,26 +691,66 @@ function AssetsContent() {
         </TabsContent>
       </Tabs>
 
-      {/* Rejection Dialog */}
+      {/* Rejection Dialog with Detailed Issues */}
       <Dialog open={showRejectionDialog} onOpenChange={setShowRejectionDialog}>
-        <DialogContent>
+        <DialogContent className="max-w-lg">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2 text-destructive">
               <XCircle className="h-5 w-5" />
-              AI Rejection Reasons
+              AI Compliance Issues
             </DialogTitle>
             <DialogDescription>
-              This asset was blocked by the AI compliance check for the following reasons:
+              The following issues were detected by the AI compliance engine:
             </DialogDescription>
           </DialogHeader>
-          <div className="space-y-3">
-            {selectedAssetForRejection?.rejectionReasons?.map((reason, index) => (
-              <div key={index} className="flex items-start gap-3 rounded-lg border border-destructive/20 bg-destructive/5 p-3">
-                <AlertCircle className="h-5 w-5 text-destructive shrink-0 mt-0.5" />
-                <p className="text-sm text-foreground">{reason}</p>
+          
+          {/* Asset Info */}
+          {selectedAssetForRejection && (
+            <div className="rounded-lg border border-border bg-muted/30 p-3 mb-4">
+              <p className="font-medium text-sm text-foreground">{selectedAssetForRejection.name}</p>
+              {selectedAssetForRejection.analysisResult && (
+                <div className="flex gap-4 mt-2 text-xs text-muted-foreground">
+                  <span>Policy Risk: {selectedAssetForRejection.analysisResult.policyRiskScore}%</span>
+                  <span>Creative Quality: {selectedAssetForRejection.analysisResult.creativeQualityScore}%</span>
+                </div>
+              )}
+            </div>
+          )}
+          
+          <div className="space-y-3 max-h-[300px] overflow-y-auto">
+            {complianceIssues.map((issue, index) => (
+              <div 
+                key={index} 
+                className={cn(
+                  "flex items-start gap-3 rounded-lg border p-3",
+                  getSeverityColor(issue.severity)
+                )}
+              >
+                <div className="shrink-0 mt-0.5">
+                  {getSeverityIcon(issue.severity)}
+                </div>
+                <div className="flex-1">
+                  <div className="flex items-center gap-2 mb-1">
+                    <Badge variant="outline" className="text-xs capitalize">
+                      {issue.severity}
+                    </Badge>
+                    {issue.category && (
+                      <Badge variant="secondary" className="text-xs capitalize">
+                        {issue.category}
+                      </Badge>
+                    )}
+                  </div>
+                  <p className="text-sm font-medium">{issue.message}</p>
+                  {issue.recommendation && (
+                    <p className="text-xs text-muted-foreground mt-1">
+                      💡 {issue.recommendation}
+                    </p>
+                  )}
+                </div>
               </div>
             ))}
           </div>
+          
           <div className="flex justify-end gap-2 mt-4">
             <Button variant="outline" onClick={() => setShowRejectionDialog(false)}>
               Close

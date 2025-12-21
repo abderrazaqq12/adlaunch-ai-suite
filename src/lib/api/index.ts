@@ -19,4 +19,9 @@ export type {
   RecoverResponse,
   MemoryWriteRequest,
   MemoryWriteResponse,
+  ComplianceIssue,
+  AnalyzeAssetRequest,
+  AnalyzeAssetResponse,
+  AnalyzeBatchRequest,
+  AnalyzeBatchResponse,
 } from './brainClient';

@@ -233,6 +233,56 @@ export interface MemoryWriteResponse {
 }
 
 // ============================================
+// AI COMPLIANCE ANALYSIS TYPES
+// ============================================
+
+export interface ComplianceIssue {
+  severity: 'low' | 'medium' | 'high' | 'critical';
+  category: 'policy' | 'creative' | 'content' | 'technical';
+  message: string;
+  recommendation?: string;
+}
+
+export interface AnalyzeAssetRequest {
+  asset: {
+    id: string;
+    type: 'video' | 'image' | 'text';
+    name: string;
+    url?: string;
+    content?: string;
+  };
+}
+
+export interface AnalyzeAssetResponse {
+  assetId: string;
+  approved: boolean;
+  policyRiskScore: number;
+  creativeQualityScore: number;
+  issues: ComplianceIssue[];
+  rejectionReasons: string[];
+  analyzedAt: string;
+}
+
+export interface AnalyzeBatchRequest {
+  assets: Array<{
+    id: string;
+    type: 'video' | 'image' | 'text';
+    name: string;
+    url?: string;
+    content?: string;
+  }>;
+}
+
+export interface AnalyzeBatchResponse {
+  results: AnalyzeAssetResponse[];
+  summary: {
+    total: number;
+    approved: number;
+    rejected: number;
+  };
+}
+
+// ============================================
 // API CLIENT
 // ============================================
 
@@ -472,6 +522,98 @@ export const brainClient = {
     });
 
     return handleResponse<MemoryWriteResponse>(response);
+  },
+
+  /**
+   * Analyze a single asset for AI compliance
+   * Returns policy risk score, creative quality score, and rejection reasons
+   */
+  async analyzeAsset(
+    projectId: string,
+    request: AnalyzeAssetRequest
+  ): Promise<AnalyzeAssetResponse> {
+    if (!BRAIN_API_BASE_URL) {
+      console.warn('[BrainClient] No API URL configured, using fallback');
+      
+      // Simulate AI analysis with realistic decision logic
+      await new Promise(resolve => setTimeout(resolve, 1500 + Math.random() * 1000));
+      
+      const policyRiskScore = Math.floor(Math.random() * 100);
+      const creativeQualityScore = 40 + Math.floor(Math.random() * 60);
+      const approved = policyRiskScore < 50 && creativeQualityScore > 50;
+      
+      const possibleIssues: ComplianceIssue[] = [
+        { severity: 'high', category: 'policy', message: 'Text overlay exceeds 20% of video frame', recommendation: 'Reduce text size or move to caption area' },
+        { severity: 'critical', category: 'content', message: 'Audio contains copyrighted music', recommendation: 'Replace with royalty-free audio' },
+        { severity: 'medium', category: 'policy', message: 'Misleading claims detected in ad copy', recommendation: 'Remove or substantiate claims with evidence' },
+        { severity: 'high', category: 'content', message: 'Prohibited product category detected', recommendation: 'Review platform advertising policies' },
+        { severity: 'low', category: 'creative', message: 'Low visual contrast may reduce engagement', recommendation: 'Increase contrast for better visibility' },
+        { severity: 'medium', category: 'technical', message: 'Video resolution below recommended quality', recommendation: 'Upload higher resolution version (1080p+)' },
+      ];
+      
+      const issues = approved 
+        ? [] 
+        : possibleIssues.slice(0, 1 + Math.floor(Math.random() * 2));
+      
+      const rejectionReasons = issues
+        .filter(i => i.severity === 'high' || i.severity === 'critical')
+        .map(i => i.message);
+
+      return {
+        assetId: request.asset.id,
+        approved,
+        policyRiskScore,
+        creativeQualityScore,
+        issues,
+        rejectionReasons,
+        analyzedAt: new Date().toISOString(),
+      };
+    }
+
+    const response = await fetch(`${BRAIN_API_BASE_URL}/v1/compliance/analyze`, {
+      method: 'POST',
+      headers: buildHeaders(projectId),
+      body: JSON.stringify(request),
+    });
+
+    return handleResponse<AnalyzeAssetResponse>(response);
+  },
+
+  /**
+   * Analyze multiple assets in batch for AI compliance
+   */
+  async analyzeAssetBatch(
+    projectId: string,
+    request: AnalyzeBatchRequest
+  ): Promise<AnalyzeBatchResponse> {
+    if (!BRAIN_API_BASE_URL) {
+      console.warn('[BrainClient] No API URL configured, using fallback');
+      
+      // Analyze each asset individually
+      const results: AnalyzeAssetResponse[] = [];
+      
+      for (const asset of request.assets) {
+        const result = await this.analyzeAsset(projectId, { asset });
+        results.push(result);
+      }
+      
+      return {
+        results,
+        summary: {
+          total: results.length,
+          approved: results.filter(r => r.approved).length,
+          rejected: results.filter(r => !r.approved).length,
+        },
+      };
+    }
+
+    const response = await fetch(`${BRAIN_API_BASE_URL}/v1/compliance/analyze-batch`, {
+      method: 'POST',
+      headers: buildHeaders(projectId),
+      body: JSON.stringify(request),
+    });
+
+    return handleResponse<AnalyzeBatchResponse>(response);
   },
 };
 
