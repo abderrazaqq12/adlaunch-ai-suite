@@ -6,7 +6,7 @@ const corsHeaders = {
 };
 
 /**
- * CAMPAIGN STATE MACHINE
+ * CAMPAIGN STATE MACHINE with STATE GUARDS
  * 
  * Campaign Intent States (before publish):
  * - DRAFT: Initial creation
@@ -20,34 +20,148 @@ const corsHeaders = {
  * - PAUSED: User or AI paused
  * - STOPPED: Permanently stopped
  * - DISAPPROVED: Platform rejected
+ * - RECOVERY: In recovery process
+ * - USER_PAUSED: Explicitly paused by user (blocks automation)
+ * 
+ * GUARDS for PUBLISH:
+ * - at least 1 READY_FOR_LAUNCH asset
+ * - adAccount.permissions includes "LAUNCH"
+ * - audience.isValid === true
+ * - objective === "CONVERSION"
+ * - platform supports conversion campaigns
  */
 
 type CampaignIntentState = 'DRAFT' | 'VALIDATING' | 'READY_TO_PUBLISH' | 'PUBLISHING' | 'FAILED';
-type CampaignState = 'ACTIVE' | 'PAUSED' | 'STOPPED' | 'DISAPPROVED';
+type CampaignState = 'ACTIVE' | 'PAUSED' | 'STOPPED' | 'DISAPPROVED' | 'RECOVERY' | 'USER_PAUSED';
 
 type CampaignIntentAction = 'VALIDATE' | 'PUBLISH' | 'EDIT' | 'DISCARD';
 type CampaignAction = 'PAUSE' | 'RESUME' | 'STOP' | 'VIEW_METRICS';
 
-interface Audience {
-  country: string;
-  gender: 'ALL' | 'MALE' | 'FEMALE';
-  ageMin: number;
-  ageMax: number;
-  language: string;
+// Platforms that support conversion campaigns
+const CONVERSION_SUPPORTED_PLATFORMS = ['GOOGLE', 'TIKTOK', 'SNAPCHAT'];
+
+// ============================================================================
+// PURE GUARD FUNCTIONS
+// ============================================================================
+
+interface GuardResult {
+  allowed: boolean;
+  reason?: string;
 }
+
+interface CampaignPublishGuardInput {
+  assets: Array<{
+    id: string;
+    state: string;
+    riskScore?: number | null;
+    platformCompatibility?: string[];
+  }>;
+  accounts: Array<{
+    id: string;
+    state: string;
+    permissions: string[];
+    platform: string;
+  }>;
+  audience: {
+    country?: string;
+    language?: string;
+    gender?: string;
+    ageMin?: number;
+    ageMax?: number;
+    isValid?: boolean;
+  };
+  objective: string;
+  targetPlatforms: string[];
+}
+
+/**
+ * CAMPAIGN → PUBLISH Guard (Pure Function)
+ */
+function guardCampaignPublish(input: CampaignPublishGuardInput): GuardResult {
+  // Guard 1: At least 1 READY_FOR_LAUNCH asset
+  const readyAssets = input.assets.filter(a => a.state === 'READY_FOR_LAUNCH');
+  if (readyAssets.length === 0) {
+    return {
+      allowed: false,
+      reason: 'At least one asset must be in READY_FOR_LAUNCH state',
+    };
+  }
+
+  // Guard 2: All accounts must have LAUNCH permission
+  const accountsWithoutLaunch = input.accounts.filter(
+    a => !a.permissions.includes('LAUNCH')
+  );
+  if (accountsWithoutLaunch.length > 0) {
+    const accountIds = accountsWithoutLaunch.map(a => a.id).join(', ');
+    return {
+      allowed: false,
+      reason: `Ad accounts missing LAUNCH permission: ${accountIds}`,
+    };
+  }
+
+  // Guard 3: Audience validation
+  if (!input.audience.country || !input.audience.language) {
+    const missingFields: string[] = [];
+    if (!input.audience.country) missingFields.push('country');
+    if (!input.audience.language) missingFields.push('language');
+    
+    return {
+      allowed: false,
+      reason: `Invalid audience configuration. Missing: ${missingFields.join(', ')}`,
+    };
+  }
+
+  // Guard 4: Objective must be CONVERSION
+  if (input.objective !== 'CONVERSION') {
+    return {
+      allowed: false,
+      reason: `Only CONVERSION objective is supported. Received: ${input.objective}`,
+    };
+  }
+
+  // Guard 5: All target platforms must support conversion campaigns
+  const unsupportedPlatforms = input.targetPlatforms.filter(
+    p => !CONVERSION_SUPPORTED_PLATFORMS.includes(p.toUpperCase())
+  );
+  if (unsupportedPlatforms.length > 0) {
+    return {
+      allowed: false,
+      reason: `Platform(s) do not support conversion campaigns: ${unsupportedPlatforms.join(', ')}`,
+    };
+  }
+
+  // Guard 6: Assets must be compatible with target platforms
+  for (const platform of input.targetPlatforms) {
+    const compatibleAssets = readyAssets.filter(
+      a => !a.platformCompatibility || a.platformCompatibility.includes(platform.toUpperCase())
+    );
+    if (compatibleAssets.length === 0) {
+      return {
+        allowed: false,
+        reason: `No compatible assets for platform: ${platform}`,
+      };
+    }
+  }
+
+  return { allowed: true };
+}
+
+// ============================================================================
+// HELPER FUNCTIONS
+// ============================================================================
 
 const CAMPAIGN_INTENT_STATE_CONFIG: Record<CampaignIntentState, { allowedActions: CampaignIntentAction[] }> = {
   DRAFT: {
     allowedActions: ['VALIDATE', 'EDIT', 'DISCARD'],
   },
   VALIDATING: {
-    allowedActions: [], // No actions during validation
+    allowedActions: [],
   },
   READY_TO_PUBLISH: {
     allowedActions: ['PUBLISH', 'EDIT', 'DISCARD'],
   },
   PUBLISHING: {
-    allowedActions: [], // No actions during publish
+    allowedActions: [],
   },
   FAILED: {
     allowedActions: ['EDIT', 'DISCARD'],
@@ -61,11 +175,17 @@ const CAMPAIGN_STATE_CONFIG: Record<CampaignState, { allowedActions: CampaignAct
   PAUSED: {
     allowedActions: ['RESUME', 'STOP', 'VIEW_METRICS'],
   },
+  USER_PAUSED: {
+    allowedActions: ['RESUME', 'STOP', 'VIEW_METRICS'],
+  },
   STOPPED: {
-    allowedActions: ['VIEW_METRICS'], // Cannot resume stopped campaigns
+    allowedActions: ['VIEW_METRICS'],
   },
   DISAPPROVED: {
-    allowedActions: ['VIEW_METRICS'], // Needs recovery flow
+    allowedActions: ['VIEW_METRICS'],
+  },
+  RECOVERY: {
+    allowedActions: ['VIEW_METRICS'],
   },
 };
 
@@ -85,9 +205,58 @@ function isCampaignActionAllowed(state: CampaignState, action: CampaignAction): 
   return getCampaignAllowedActions(state).includes(action);
 }
 
+// Blocked event log
+const blockedEvents: any[] = [];
+
+function logBlockedEvent(
+  entityId: string,
+  action: string,
+  reason: string,
+  guardName: string,
+  context?: Record<string, unknown>
+) {
+  const event = {
+    id: `blocked_${Date.now()}`,
+    type: 'GUARD_BLOCKED',
+    entity: 'CAMPAIGN',
+    entityId,
+    action,
+    reason,
+    metadata: { guardName, ...context },
+    timestamp: new Date().toISOString(),
+  };
+  blockedEvents.push(event);
+  console.log(`[campaigns] GUARD_BLOCKED: ${guardName} - ${reason}`);
+  return event;
+}
+
 // Mock databases
 const mockIntents: Map<string, any> = new Map();
 const mockCampaigns: Map<string, any> = new Map();
+
+// Mock asset/account data for guard validation
+const mockAssetStore: Map<string, any> = new Map();
+const mockAccountStore: Map<string, any> = new Map();
+
+// Initialize some mock accounts
+mockAccountStore.set('acc_google_1', {
+  id: 'acc_google_1',
+  platform: 'GOOGLE',
+  state: 'CONNECTED',
+  permissions: ['ANALYZE', 'LAUNCH'],
+});
+mockAccountStore.set('acc_tiktok_1', {
+  id: 'acc_tiktok_1',
+  platform: 'TIKTOK',
+  state: 'CONNECTED',
+  permissions: ['ANALYZE', 'LAUNCH'],
+});
+mockAccountStore.set('acc_snapchat_1', {
+  id: 'acc_snapchat_1',
+  platform: 'SNAPCHAT',
+  state: 'CONNECTED',
+  permissions: ['ANALYZE'], // No LAUNCH permission - will fail guard
+});
 
 serve(async (req) => {
   if (req.method === 'OPTIONS') {
@@ -105,7 +274,7 @@ serve(async (req) => {
       const body = await req.json();
       const { assets, accounts, audience, objective } = body;
 
-      // Validation rules
+      // Basic validation
       const errors: string[] = [];
       
       if (!assets || assets.length === 0) {
@@ -156,7 +325,6 @@ serve(async (req) => {
       };
       
       mockIntents.set(intentId, intent);
-      console.log(`[campaigns] Created intent ${intentId}, validating...`);
 
       // Simulate async validation
       setTimeout(() => {
@@ -200,9 +368,10 @@ serve(async (req) => {
       });
     }
 
-    // POST /campaigns/intents/{id}/publish - Publish campaign
+    // POST /campaigns/intents/{id}/publish - Publish campaign (WITH GUARDS)
     if (req.method === 'POST' && pathParts.length === 4 && pathParts[1] === 'intents' && pathParts[3] === 'publish') {
       const intentId = pathParts[2];
+      const body = await req.json().catch(() => ({}));
       const intent = mockIntents.get(intentId);
       
       if (!intent) {
@@ -212,9 +381,9 @@ serve(async (req) => {
         });
       }
 
-      // ENFORCE STATE MACHINE
+      // STATE MACHINE CHECK
       if (!isIntentActionAllowed(intent.state, 'PUBLISH')) {
-        console.log(`[campaigns] REJECTED: Cannot publish intent in ${intent.state} state`);
+        logBlockedEvent(intentId, 'PUBLISH', `Cannot publish in ${intent.state} state`, 'STATE_MACHINE');
         return new Response(JSON.stringify({
           error: 'INVALID_TRANSITION',
           message: `Cannot publish in ${intent.state} state. Must be READY_TO_PUBLISH.`,
@@ -226,23 +395,78 @@ serve(async (req) => {
         });
       }
 
-      // Transition to PUBLISHING
+      // RESOLVE ASSET AND ACCOUNT DETAILS FOR GUARD
+      // In production, fetch from database
+      const assetDetails = (body.assetDetails || []).length > 0 
+        ? body.assetDetails 
+        : intent.assets.map((id: string) => ({
+            id,
+            state: mockAssetStore.get(id)?.state || 'READY_FOR_LAUNCH', // Default for testing
+            riskScore: mockAssetStore.get(id)?.riskScore || 20,
+            platformCompatibility: mockAssetStore.get(id)?.platformCompatibility || ['GOOGLE', 'TIKTOK', 'SNAPCHAT'],
+          }));
+
+      const accountDetails = intent.accounts.map((id: string) => {
+        const acc = mockAccountStore.get(id);
+        return acc || {
+          id,
+          state: 'CONNECTED',
+          permissions: ['ANALYZE', 'LAUNCH'],
+          platform: id.includes('google') ? 'GOOGLE' : id.includes('tiktok') ? 'TIKTOK' : 'SNAPCHAT',
+        };
+      });
+
+      const targetPlatforms: string[] = [...new Set(accountDetails.map((a: any) => a.platform as string))];
+
+      // RUN CAMPAIGN PUBLISH GUARD (Pure function)
+      const guardResult = guardCampaignPublish({
+        assets: assetDetails,
+        accounts: accountDetails,
+        audience: {
+          ...intent.audience,
+        },
+        objective: intent.objective,
+        targetPlatforms,
+      });
+
+      if (!guardResult.allowed) {
+        // Log BLOCKED_EVENT
+        logBlockedEvent(
+          intentId,
+          'PUBLISH',
+          guardResult.reason!,
+          'guardCampaignPublish',
+          { targetPlatforms, accountCount: accountDetails.length, assetCount: assetDetails.length }
+        );
+
+        return new Response(JSON.stringify({
+          error: 'GUARD_BLOCKED',
+          guardName: 'guardCampaignPublish',
+          message: guardResult.reason,
+          currentState: intent.state,
+          allowedActions: getIntentAllowedActions(intent.state),
+        }), {
+          status: 403,
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        });
+      }
+
+      // All guards passed - proceed with publish
       intent.state = 'PUBLISHING';
       intent.updatedAt = new Date().toISOString();
       mockIntents.set(intentId, intent);
-      console.log(`[campaigns] Publishing intent ${intentId}...`);
+      console.log(`[campaigns] Publishing intent ${intentId} (guards passed)...`);
 
       // Create campaigns for each account
       const createdCampaigns: any[] = [];
       
-      for (const accountId of intent.accounts) {
-        const campaignId = `camp_${Date.now()}_${accountId}`;
+      for (const account of accountDetails) {
+        const campaignId = `camp_${Date.now()}_${account.id}`;
         const campaign = {
           id: campaignId,
           intentId,
-          accountId,
-          platform: accountId.includes('google') ? 'GOOGLE' : 
-                   accountId.includes('tiktok') ? 'TIKTOK' : 'SNAPCHAT',
+          accountId: account.id,
+          platform: account.platform,
           state: 'ACTIVE' as CampaignState,
           metrics: {
             spend: 0,
@@ -261,6 +485,7 @@ serve(async (req) => {
         createdCampaigns.push({
           id: campaignId,
           state: campaign.state,
+          platform: campaign.platform,
           allowedActions: getCampaignAllowedActions(campaign.state),
         });
         console.log(`[campaigns] Created campaign ${campaignId}`);
@@ -313,7 +538,7 @@ serve(async (req) => {
       });
     }
 
-    // POST /campaigns/{id}/pause - Pause campaign
+    // POST /campaigns/{id}/pause
     if (req.method === 'POST' && pathParts.length === 3 && pathParts[2] === 'pause') {
       const campaignId = pathParts[1];
       const campaign = mockCampaigns.get(campaignId);
@@ -326,6 +551,7 @@ serve(async (req) => {
       }
 
       if (!isCampaignActionAllowed(campaign.state, 'PAUSE')) {
+        logBlockedEvent(campaignId, 'PAUSE', `Cannot pause in ${campaign.state} state`, 'STATE_MACHINE');
         return new Response(JSON.stringify({
           error: 'INVALID_TRANSITION',
           message: `Cannot pause campaign in ${campaign.state} state`,
@@ -350,7 +576,7 @@ serve(async (req) => {
       });
     }
 
-    // POST /campaigns/{id}/resume - Resume campaign
+    // POST /campaigns/{id}/resume
     if (req.method === 'POST' && pathParts.length === 3 && pathParts[2] === 'resume') {
       const campaignId = pathParts[1];
       const campaign = mockCampaigns.get(campaignId);
@@ -363,6 +589,7 @@ serve(async (req) => {
       }
 
       if (!isCampaignActionAllowed(campaign.state, 'RESUME')) {
+        logBlockedEvent(campaignId, 'RESUME', `Cannot resume in ${campaign.state} state`, 'STATE_MACHINE');
         return new Response(JSON.stringify({
           error: 'INVALID_TRANSITION',
           message: `Cannot resume campaign in ${campaign.state} state`,
@@ -387,7 +614,7 @@ serve(async (req) => {
       });
     }
 
-    // POST /campaigns/{id}/stop - Stop campaign permanently
+    // POST /campaigns/{id}/stop
     if (req.method === 'POST' && pathParts.length === 3 && pathParts[2] === 'stop') {
       const campaignId = pathParts[1];
       const campaign = mockCampaigns.get(campaignId);
@@ -400,6 +627,7 @@ serve(async (req) => {
       }
 
       if (!isCampaignActionAllowed(campaign.state, 'STOP')) {
+        logBlockedEvent(campaignId, 'STOP', `Cannot stop in ${campaign.state} state`, 'STATE_MACHINE');
         return new Response(JSON.stringify({
           error: 'INVALID_TRANSITION',
           message: `Cannot stop campaign in ${campaign.state} state`,
@@ -420,6 +648,13 @@ serve(async (req) => {
         ...campaign,
         allowedActions: getCampaignAllowedActions(campaign.state),
       }), {
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
+
+    // GET /campaigns/blocked-events - Get blocked event log
+    if (req.method === 'GET' && pathParts.length === 2 && pathParts[1] === 'blocked-events') {
+      return new Response(JSON.stringify({ events: blockedEvents }), {
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       });
     }

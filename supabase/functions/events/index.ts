@@ -35,7 +35,8 @@ type EventType =
   | 'RULE_COOLDOWN_STARTED'
   | 'DISAPPROVAL_DETECTED'
   | 'RECOVERY_INITIATED'
-  | 'RECOVERY_COMPLETED';
+  | 'RECOVERY_COMPLETED'
+  | 'GUARD_BLOCKED'; // NEW: Guard blocked a transition
 
 type EntityType = 'ASSET' | 'CAMPAIGN' | 'AD_ACCOUNT' | 'RULE' | 'SYSTEM';
 
