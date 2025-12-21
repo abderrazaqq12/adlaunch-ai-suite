@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useCallback } from 'react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Label } from '@/components/ui/label';
@@ -7,12 +7,15 @@ import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useProjectStore } from '@/stores/projectStore';
 import { useToast } from '@/hooks/use-toast';
+import { useAssetStorage } from '@/hooks/useAssetStorage';
 import { ProjectGate } from '@/components/common/ProjectGate';
 import { AssetStatusBadge } from '@/components/common/AssetStatusBadge';
 import { brainClient, BrainClientError } from '@/lib/api';
 import type { Asset, AssetStatus } from '@/types';
 import { getAssetStateConfig } from '@/lib/state-machines/types';
 import type { ComplianceIssue } from '@/lib/api';
+import { sanitizeAdCopy, safeDisplayText, TEXT_LIMITS } from '@/lib/validation/textSanitization';
+import { validateFiles, ALLOWED_VIDEO_MIME_TYPES, MAX_FILE_SIZE_MB } from '@/lib/validation/fileValidation';
 import { 
   Upload, 
   Video, 
@@ -39,21 +42,19 @@ import {
 import { Progress } from '@/components/ui/progress';
 
 /**
- * Asset Manager - State Machine Driven
+ * Asset Manager - State Machine Driven with Hardened Data Handling
  * 
- * States: UPLOADED → ANALYZING → APPROVED → READY_FOR_LAUNCH | BLOCKED
- * 
- * UI Rules per State:
- * - UPLOADED: Show "Run AI Analysis"
- * - ANALYZING: Spinner, disable all actions
- * - APPROVED: Show "View AI Decision", "Mark Ready for Launch"
- * - READY_FOR_LAUNCH: Show badge, can unmark
- * - BLOCKED: Show issues, "Generate Safe Variant", "Re-analyze"
+ * Features:
+ * - Supabase Storage uploads (no URL.createObjectURL leaks)
+ * - File validation (500MB max, MIME whitelist)
+ * - Text sanitization (XSS-safe, max length)
+ * - Proper cleanup on delete
  */
 
 function AssetsContent() {
   const [activeTab, setActiveTab] = useState('videos');
   const [textContent, setTextContent] = useState('');
+  const [textError, setTextError] = useState<string | null>(null);
   const [showDecisionDialog, setShowDecisionDialog] = useState(false);
   const [selectedAsset, setSelectedAsset] = useState<Asset | null>(null);
   const [complianceIssues, setComplianceIssues] = useState<ComplianceIssue[]>([]);
@@ -62,6 +63,13 @@ function AssetsContent() {
   
   const { assets, addAsset, removeAsset, updateAsset, currentProject } = useProjectStore();
   const { toast } = useToast();
+  
+  const { 
+    uploadFile, 
+    deleteFile,
+    isUploading,
+    revokeObjectUrl,
+  } = useAssetStorage({ projectId: currentProject?.id });
 
   const projectAssets = assets.filter(a => a.projectId === currentProject?.id);
   const videoAssets = projectAssets.filter(a => a.type === 'video');
@@ -89,40 +97,98 @@ function AssetsContent() {
     }
   };
 
-  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>, type: 'video' | 'image') => {
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>, type: 'video' | 'image') => {
     const files = e.target.files;
     if (!files || !currentProject) return;
 
-    Array.from(files).forEach(file => {
-      const newAsset: Asset = {
-        id: `asset-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-        projectId: currentProject.id,
-        type,
-        name: file.name,
-        url: URL.createObjectURL(file),
-        createdAt: new Date().toISOString(),
-        status: 'UPLOADED', // Initial state
-      };
-      addAsset(newAsset);
+    // Validate files first
+    const { validFiles, errors } = validateFiles(Array.from(files), ALLOWED_VIDEO_MIME_TYPES);
+    
+    // Report validation errors
+    errors.forEach(({ file, error }) => {
+      toast({
+        title: 'Upload Blocked',
+        description: `${file.name}: ${error}`,
+        variant: 'destructive',
+      });
     });
 
-    toast({
-      title: 'Assets Uploaded',
-      description: `${files.length} file(s) uploaded. Run AI analysis to proceed.`,
-    });
+    if (validFiles.length === 0) {
+      e.target.value = '';
+      return;
+    }
+
+    let successCount = 0;
+
+    for (const file of validFiles) {
+      const result = await uploadFile(file, type);
+      
+      if (result.success && result.url) {
+        const newAsset: Asset = {
+          id: `asset-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+          projectId: currentProject.id,
+          type,
+          name: file.name,
+          url: result.url,
+          storagePath: result.path,
+          createdAt: new Date().toISOString(),
+          status: 'UPLOADED',
+        };
+        addAsset(newAsset);
+        successCount++;
+      } else {
+        toast({
+          title: 'Upload Failed',
+          description: `${file.name}: ${result.error}`,
+          variant: 'destructive',
+        });
+      }
+    }
+
+    if (successCount > 0) {
+      toast({
+        title: 'Assets Uploaded',
+        description: `${successCount} file(s) uploaded. Run AI analysis to proceed.`,
+      });
+    }
+
+    e.target.value = '';
   };
+
+  const handleTextChange = useCallback((value: string) => {
+    setTextContent(value);
+    
+    // Validate on change
+    if (value.length > TEXT_LIMITS.AD_COPY) {
+      setTextError(`Ad copy must be ${TEXT_LIMITS.AD_COPY} characters or less (${value.length} entered)`);
+    } else {
+      setTextError(null);
+    }
+  }, []);
 
   const handleAddText = () => {
     if (!textContent || !currentProject) return;
+
+    // Sanitize and validate
+    const { value, isValid, error } = sanitizeAdCopy(textContent);
+    
+    if (!isValid) {
+      toast({
+        title: 'Invalid Ad Copy',
+        description: error,
+        variant: 'destructive',
+      });
+      return;
+    }
 
     const newAsset: Asset = {
       id: `asset-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
       projectId: currentProject.id,
       type: 'text',
-      name: textContent.substring(0, 50) + (textContent.length > 50 ? '...' : ''),
-      content: textContent,
+      name: value.substring(0, 50) + (value.length > 50 ? '...' : ''),
+      content: value,
       createdAt: new Date().toISOString(),
-      status: 'UPLOADED', // Initial state
+      status: 'UPLOADED',
     };
     addAsset(newAsset);
 
@@ -132,6 +198,21 @@ function AssetsContent() {
     });
 
     setTextContent('');
+    setTextError(null);
+  };
+
+  const handleRemoveAsset = async (asset: Asset) => {
+    // Cleanup storage file if it exists
+    if (asset.storagePath) {
+      await deleteFile(asset.storagePath);
+    }
+    
+    // Revoke any object URLs (for backwards compatibility)
+    if (asset.url?.startsWith('blob:')) {
+      revokeObjectUrl(asset.url);
+    }
+    
+    removeAsset(asset.id);
   };
 
   const handleRunAnalysis = async (assetId: string) => {
@@ -313,7 +394,7 @@ function AssetsContent() {
           <div className="flex items-start justify-between gap-2">
             <div className="flex-1 min-w-0">
               <div className="flex items-center gap-2 mb-2 flex-wrap">
-                <p className="truncate font-medium text-foreground">{asset.name}</p>
+                <p className="truncate font-medium text-foreground">{safeDisplayText(asset.name)}</p>
                 <AssetStatusBadge status={asset.status} size="sm" />
               </div>
               
@@ -437,8 +518,8 @@ function AssetsContent() {
               variant="ghost"
               size="icon"
               className="shrink-0 text-destructive hover:text-destructive"
-              onClick={() => removeAsset(asset.id)}
-              disabled={asset.status === 'ANALYZING'}
+              onClick={() => handleRemoveAsset(asset)}
+              disabled={asset.status === 'ANALYZING' || isUploading}
             >
               <Trash2 className="h-4 w-4" />
             </Button>
@@ -577,18 +658,26 @@ function AssetsContent() {
               <div className="relative">
                 <input
                   type="file"
-                  accept="video/*"
+                  accept="video/mp4,video/webm,video/quicktime,video/x-msvideo"
                   multiple
                   onChange={(e) => handleFileUpload(e, 'video')}
                   className="absolute inset-0 cursor-pointer opacity-0"
+                  disabled={isUploading}
                 />
-                <div className="flex flex-col items-center justify-center rounded-lg border-2 border-dashed border-border bg-muted/30 p-12 transition-colors hover:border-primary/50 hover:bg-muted/50">
-                  <Upload className="h-10 w-10 text-muted-foreground" />
+                <div className={cn(
+                  "flex flex-col items-center justify-center rounded-lg border-2 border-dashed border-border bg-muted/30 p-12 transition-colors hover:border-primary/50 hover:bg-muted/50",
+                  isUploading && "opacity-50 pointer-events-none"
+                )}>
+                  {isUploading ? (
+                    <Loader2 className="h-10 w-10 text-muted-foreground animate-spin" />
+                  ) : (
+                    <Upload className="h-10 w-10 text-muted-foreground" />
+                  )}
                   <p className="mt-4 font-medium text-foreground">
-                    Drop video files here or click to upload
+                    {isUploading ? 'Uploading...' : 'Drop video files here or click to upload'}
                   </p>
                   <p className="mt-1 text-sm text-muted-foreground">
-                    MP4, MOV, or WebM up to 500MB each
+                    MP4, MOV, or WebM up to {MAX_FILE_SIZE_MB}MB each
                   </p>
                 </div>
               </div>
@@ -618,12 +707,30 @@ function AssetsContent() {
                   id="adCopy"
                   placeholder="Enter your ad headline and description..."
                   value={textContent}
-                  onChange={(e) => setTextContent(e.target.value)}
+                  onChange={(e) => handleTextChange(e.target.value)}
                   rows={4}
+                  maxLength={TEXT_LIMITS.AD_COPY + 100} // Allow slight overage for feedback
+                  className={cn(textError && "border-destructive")}
                 />
+                <div className="flex justify-between text-xs">
+                  {textError ? (
+                    <span className="text-destructive">{textError}</span>
+                  ) : (
+                    <span className="text-muted-foreground">Max {TEXT_LIMITS.AD_COPY} characters</span>
+                  )}
+                  <span className={cn(
+                    "text-muted-foreground",
+                    textContent.length > TEXT_LIMITS.AD_COPY && "text-destructive"
+                  )}>
+                    {textContent.length}/{TEXT_LIMITS.AD_COPY}
+                  </span>
+                </div>
               </div>
 
-              <Button onClick={handleAddText} disabled={!textContent}>
+              <Button 
+                onClick={handleAddText} 
+                disabled={!textContent || !!textError}
+              >
                 <Plus className="mr-2 h-4 w-4" />
                 Add Variation
               </Button>
@@ -652,7 +759,10 @@ function AssetsContent() {
                             </span>
                           )}
                         </div>
-                        <p className="text-foreground">{asset.content}</p>
+                        {/* XSS-safe text rendering */}
+                        <p className="text-foreground whitespace-pre-wrap">
+                          {safeDisplayText(asset.content || '')}
+                        </p>
                         
                         {/* State-Driven Actions */}
                         <div className="flex flex-wrap gap-2 mt-3">
@@ -743,7 +853,7 @@ function AssetsContent() {
                         variant="ghost"
                         size="icon"
                         className="shrink-0 text-destructive hover:text-destructive"
-                        onClick={() => removeAsset(asset.id)}
+                        onClick={() => handleRemoveAsset(asset)}
                         disabled={asset.status === 'ANALYZING'}
                       >
                         <Trash2 className="h-4 w-4" />
@@ -778,7 +888,7 @@ function AssetsContent() {
           
           {selectedAsset && (
             <div className="rounded-lg border border-border bg-muted/30 p-3 mb-4">
-              <p className="font-medium text-sm text-foreground">{selectedAsset.name}</p>
+              <p className="font-medium text-sm text-foreground">{safeDisplayText(selectedAsset.name)}</p>
               {selectedAsset.analysisResult && (
                 <div className="flex gap-4 mt-2 text-xs text-muted-foreground">
                   <span>Policy Risk: {selectedAsset.analysisResult.policyRiskScore}%</span>
@@ -800,7 +910,7 @@ function AssetsContent() {
                     <Badge variant="outline" className="text-xs capitalize mb-1">
                       {issue.severity}
                     </Badge>
-                    <p className="text-sm font-medium">{issue.message}</p>
+                    <p className="text-sm font-medium">{safeDisplayText(issue.message)}</p>
                   </div>
                 </div>
               ))}

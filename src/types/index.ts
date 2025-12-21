@@ -224,6 +224,7 @@ export interface Asset {
   type: 'video' | 'image' | 'text';
   name: string;
   url?: string;
+  storagePath?: string; // Supabase Storage path for cleanup
   content?: string;
   createdAt: string;
   status: AssetStatus;
