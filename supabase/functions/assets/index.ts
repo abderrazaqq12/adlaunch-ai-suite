@@ -138,28 +138,60 @@ function canTransition(currentState: AssetState, targetState: AssetState): boole
   return ASSET_STATE_CONFIG[currentState]?.canTransitionTo.includes(targetState) || false;
 }
 
-// Event log for BLOCKED_EVENTS (in production, call events function)
-const blockedEvents: any[] = [];
+// ============================================================================
+// NORMALIZED EVENT EMISSION
+// ============================================================================
 
-function logBlockedEvent(
+type EventType = 
+  | 'ASSET_UPLOADED' | 'ASSET_ANALYZING' | 'ASSET_ANALYZED' 
+  | 'ASSET_APPROVED' | 'ASSET_BLOCKED' | 'ASSET_MARKED_READY' | 'ASSET_UNMARKED_READY'
+  | 'STATE_GUARD_BLOCKED' | 'STATE_TRANSITION_BLOCKED';
+
+type EventSource = 'UI' | 'AI' | 'AUTOMATION' | 'SYSTEM';
+
+interface NormalizedEvent {
+  eventId: string;
+  eventType: EventType;
+  source: EventSource;
+  entityType: 'ASSET';
+  entityId: string;
+  previousState?: string;
+  newState?: string;
+  action?: string;
+  reason?: string;
+  metadata?: Record<string, unknown>;
+  timestamp: string;
+}
+
+const eventStore: NormalizedEvent[] = [];
+
+function generateEventId(): string {
+  return `evt_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+}
+
+function emitEvent(
+  eventType: EventType,
+  source: EventSource,
   entityId: string,
-  action: string,
-  reason: string,
-  guardName: string,
-  context?: Record<string, unknown>
-) {
-  const event = {
-    id: `blocked_${Date.now()}`,
-    type: 'GUARD_BLOCKED',
-    entity: 'ASSET',
+  options: {
+    previousState?: string;
+    newState?: string;
+    action?: string;
+    reason?: string;
+    metadata?: Record<string, unknown>;
+  } = {}
+): NormalizedEvent {
+  const event: NormalizedEvent = {
+    eventId: generateEventId(),
+    eventType,
+    source,
+    entityType: 'ASSET',
     entityId,
-    action,
-    reason,
-    metadata: { guardName, ...context },
     timestamp: new Date().toISOString(),
+    ...options,
   };
-  blockedEvents.push(event);
-  console.log(`[assets] GUARD_BLOCKED: ${guardName} - ${reason}`);
+  eventStore.unshift(event);
+  console.log(`[assets] EVENT: ${eventType} | ASSET/${entityId} | source=${source}`);
   return event;
 }
 
@@ -268,7 +300,11 @@ serve(async (req) => {
 
       // STATE MACHINE CHECK
       if (!isActionAllowed(asset.state, 'ANALYZE') && !isActionAllowed(asset.state, 'RE_ANALYZE')) {
-        logBlockedEvent(assetId, 'ANALYZE', `Cannot analyze in ${asset.state} state`, 'STATE_MACHINE');
+        emitEvent('STATE_TRANSITION_BLOCKED', 'SYSTEM', assetId, {
+          action: 'ANALYZE',
+          reason: `Cannot analyze in ${asset.state} state`,
+          metadata: { currentState: asset.state },
+        });
         return new Response(JSON.stringify({
           error: 'INVALID_TRANSITION',
           message: `Cannot analyze asset in ${asset.state} state`,
@@ -280,10 +316,15 @@ serve(async (req) => {
         });
       }
 
+      const previousState = asset.state;
       asset.state = 'ANALYZING';
       asset.updatedAt = new Date().toISOString();
       mockAssets.set(assetId, asset);
-      console.log(`[assets] Asset ${assetId} transitioned to ANALYZING`);
+      
+      emitEvent('ASSET_ANALYZING', 'SYSTEM', assetId, {
+        previousState,
+        newState: 'ANALYZING',
+      });
 
       // Simulate async analysis
       setTimeout(() => {
@@ -324,7 +365,11 @@ serve(async (req) => {
 
       // STATE MACHINE CHECK
       if (!isActionAllowed(asset.state, 'MARK_READY_FOR_LAUNCH')) {
-        logBlockedEvent(assetId, 'MARK_READY_FOR_LAUNCH', `Action not allowed in ${asset.state} state`, 'STATE_MACHINE');
+        emitEvent('STATE_TRANSITION_BLOCKED', 'SYSTEM', assetId, {
+          action: 'MARK_READY_FOR_LAUNCH',
+          reason: `Action not allowed in ${asset.state} state`,
+          metadata: { currentState: asset.state },
+        });
         return new Response(JSON.stringify({
           error: 'INVALID_TRANSITION',
           message: `Cannot mark asset ready in ${asset.state} state. Must be APPROVED first.`,
@@ -348,14 +393,12 @@ serve(async (req) => {
       );
 
       if (!guardResult.allowed) {
-        // Log BLOCKED_EVENT
-        logBlockedEvent(
-          assetId,
-          'MARK_READY_FOR_LAUNCH',
-          guardResult.reason!,
-          'guardAssetReadyForLaunch',
-          { riskScore: asset.riskScore, targetPlatform }
-        );
+        // Emit STATE_GUARD_BLOCKED event
+        emitEvent('STATE_GUARD_BLOCKED', 'SYSTEM', assetId, {
+          action: 'MARK_READY_FOR_LAUNCH',
+          reason: guardResult.reason,
+          metadata: { guardName: 'guardAssetReadyForLaunch', riskScore: asset.riskScore, targetPlatform },
+        });
 
         return new Response(JSON.stringify({
           error: 'GUARD_BLOCKED',
@@ -371,7 +414,11 @@ serve(async (req) => {
 
       // TRANSITION CHECK
       if (!canTransition(asset.state, 'READY_FOR_LAUNCH')) {
-        logBlockedEvent(assetId, 'MARK_READY_FOR_LAUNCH', `Invalid transition from ${asset.state}`, 'TRANSITION');
+        emitEvent('STATE_TRANSITION_BLOCKED', 'SYSTEM', assetId, {
+          action: 'MARK_READY_FOR_LAUNCH',
+          reason: `Invalid transition from ${asset.state}`,
+          metadata: { currentState: asset.state, targetState: 'READY_FOR_LAUNCH' },
+        });
         return new Response(JSON.stringify({
           error: 'INVALID_TRANSITION',
           message: `Cannot transition from ${asset.state} to READY_FOR_LAUNCH`,
@@ -384,10 +431,15 @@ serve(async (req) => {
       }
 
       // All guards passed - execute transition
+      const previousState = asset.state;
       asset.state = 'READY_FOR_LAUNCH';
       asset.updatedAt = new Date().toISOString();
       mockAssets.set(assetId, asset);
-      console.log(`[assets] Asset ${assetId} marked READY_FOR_LAUNCH (guards passed)`);
+      
+      emitEvent('ASSET_MARKED_READY', 'UI', assetId, {
+        previousState,
+        newState: 'READY_FOR_LAUNCH',
+      });
 
       return new Response(JSON.stringify({
         ...asset,
@@ -410,7 +462,11 @@ serve(async (req) => {
       }
 
       if (!isActionAllowed(asset.state, 'UNMARK_READY')) {
-        logBlockedEvent(assetId, 'UNMARK_READY', `Action not allowed in ${asset.state} state`, 'STATE_MACHINE');
+        emitEvent('STATE_TRANSITION_BLOCKED', 'SYSTEM', assetId, {
+          action: 'UNMARK_READY',
+          reason: `Action not allowed in ${asset.state} state`,
+          metadata: { currentState: asset.state },
+        });
         return new Response(JSON.stringify({
           error: 'INVALID_TRANSITION',
           message: `Cannot unmark asset in ${asset.state} state`,
@@ -422,10 +478,15 @@ serve(async (req) => {
         });
       }
 
+      const previousState = asset.state;
       asset.state = 'APPROVED';
       asset.updatedAt = new Date().toISOString();
       mockAssets.set(assetId, asset);
-      console.log(`[assets] Asset ${assetId} unmarked, back to APPROVED`);
+      
+      emitEvent('ASSET_UNMARKED_READY', 'UI', assetId, {
+        previousState,
+        newState: 'APPROVED',
+      });
 
       return new Response(JSON.stringify({
         ...asset,
@@ -435,9 +496,13 @@ serve(async (req) => {
       });
     }
 
-    // GET /assets/blocked-events - Get blocked event log
-    if (req.method === 'GET' && pathParts.length === 2 && pathParts[1] === 'blocked-events') {
-      return new Response(JSON.stringify({ events: blockedEvents }), {
+    // GET /assets/events - Get all asset events (normalized schema)
+    if (req.method === 'GET' && pathParts.length === 2 && pathParts[1] === 'events') {
+      const blockedOnly = url.searchParams.get('blocked') === 'true';
+      const filtered = blockedOnly 
+        ? eventStore.filter(e => e.eventType.includes('BLOCKED'))
+        : eventStore;
+      return new Response(JSON.stringify({ events: filtered }), {
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       });
     }
