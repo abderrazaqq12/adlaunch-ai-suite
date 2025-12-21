@@ -46,6 +46,7 @@ type ConnectionStatus = 'idle' | 'testing' | 'success' | 'error';
 interface ConnectionState {
   brain: { status: ConnectionStatus; message?: string };
   llm: { status: ConnectionStatus; message?: string };
+  aiCompliance: { status: ConnectionStatus; message?: string };
 }
 
 function SettingsContent() {
@@ -56,6 +57,7 @@ function SettingsContent() {
   const [connectionState, setConnectionState] = useState<ConnectionState>({
     brain: { status: 'idle' },
     llm: { status: 'idle' },
+    aiCompliance: { status: 'idle' },
   });
   
   const [config, setConfig] = useState<APIConfig>({
@@ -126,6 +128,64 @@ function SettingsContent() {
       setConnectionState(prev => ({ 
         ...prev, 
         brain: { status: 'error', message } 
+      }));
+      toast({
+        title: 'Connection Failed',
+        description: message,
+        variant: 'destructive',
+      });
+    }
+  };
+
+  const testAiComplianceConnection = async () => {
+    setConnectionState(prev => ({ ...prev, aiCompliance: { status: 'testing' } }));
+
+    try {
+      const response = await fetch('https://fzngibjbhrirkdbpxmii.supabase.co/functions/v1/analyze-asset', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          asset: {
+            id: 'test-asset',
+            type: 'text',
+            name: 'Connection Test',
+            content: 'This is a test advertisement for compliance check.',
+          },
+        }),
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        setConnectionState(prev => ({ 
+          ...prev, 
+          aiCompliance: { 
+            status: 'success', 
+            message: `Connected! Score: ${data.creativeQualityScore}/100` 
+          } 
+        }));
+        toast({
+          title: 'AI Compliance Connected',
+          description: 'Successfully connected to Lovable AI Gateway.',
+        });
+      } else {
+        const errorData = await response.json().catch(() => ({ error: 'Unknown error' }));
+        setConnectionState(prev => ({ 
+          ...prev, 
+          aiCompliance: { status: 'error', message: errorData.error || `HTTP ${response.status}` } 
+        }));
+        toast({
+          title: 'Connection Failed',
+          description: errorData.error || 'Could not connect to AI service.',
+          variant: 'destructive',
+        });
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Unknown error';
+      setConnectionState(prev => ({ 
+        ...prev, 
+        aiCompliance: { status: 'error', message } 
       }));
       toast({
         title: 'Connection Failed',
@@ -264,7 +324,41 @@ function SettingsContent() {
       </div>
 
       {/* Status Overview */}
-      <div className="grid gap-4 sm:grid-cols-2">
+      <div className="grid gap-4 sm:grid-cols-3">
+        {/* AI Compliance Card */}
+        <Card className={cn(
+          "border-2 transition-colors",
+          connectionState.aiCompliance.status === 'success' ? "border-success/50 bg-success/5" :
+          connectionState.aiCompliance.status === 'error' ? "border-destructive/50 bg-destructive/5" :
+          "border-primary/50 bg-primary/5"
+        )}>
+          <CardContent className="p-4 flex items-center gap-3">
+            <div className={cn(
+              "flex h-10 w-10 items-center justify-center rounded-lg",
+              connectionState.aiCompliance.status === 'success' ? "bg-success/10" :
+              connectionState.aiCompliance.status === 'error' ? "bg-destructive/10" :
+              "bg-primary/10"
+            )}>
+              {connectionState.aiCompliance.status === 'success' ? (
+                <CheckCircle2 className="h-5 w-5 text-success" />
+              ) : connectionState.aiCompliance.status === 'error' ? (
+                <AlertCircle className="h-5 w-5 text-destructive" />
+              ) : (
+                <Sparkles className="h-5 w-5 text-primary" />
+              )}
+            </div>
+            <div>
+              <p className="font-medium text-foreground">AI Compliance</p>
+              <p className="text-sm text-muted-foreground">
+                {connectionState.aiCompliance.status === 'success' ? 'Connected' :
+                 connectionState.aiCompliance.status === 'error' ? 'Failed' :
+                 'Lovable AI Gateway'}
+              </p>
+            </div>
+          </CardContent>
+        </Card>
+
+        {/* Brain API Card */}
         <Card className={cn(
           "border-2 transition-colors",
           connectionState.brain.status === 'success' ? "border-success/50 bg-success/5" :
@@ -299,6 +393,7 @@ function SettingsContent() {
           </CardContent>
         </Card>
         
+        {/* LLM Provider Card */}
         <Card className={cn(
           "border-2 transition-colors",
           connectionState.llm.status === 'success' ? "border-success/50 bg-success/5" :
@@ -333,6 +428,53 @@ function SettingsContent() {
           </CardContent>
         </Card>
       </div>
+
+      {/* AI Compliance Configuration (Lovable AI) */}
+      <Card className="border-border bg-card">
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <Sparkles className="h-5 w-5" />
+            AI Compliance Analysis
+          </CardTitle>
+          <CardDescription>
+            Powered by Lovable AI Gateway - analyzes assets for advertising policy compliance across Google, TikTok, and Snapchat.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="rounded-lg border border-success/20 bg-success/5 p-4">
+            <div className="flex items-start gap-3">
+              <CheckCircle2 className="h-5 w-5 text-success shrink-0 mt-0.5" />
+              <div>
+                <p className="font-medium text-foreground">Pre-configured & Ready</p>
+                <p className="text-sm text-muted-foreground mt-1">
+                  AI compliance analysis is automatically configured using Lovable AI Gateway. No API keys required.
+                </p>
+              </div>
+            </div>
+          </div>
+
+          {/* Test Connection Button */}
+          <div className="flex items-center gap-3 pt-2">
+            <Button 
+              variant="outline" 
+              onClick={testAiComplianceConnection}
+              disabled={connectionState.aiCompliance.status === 'testing'}
+              className="gap-2"
+            >
+              {getStatusIcon(connectionState.aiCompliance.status)}
+              {connectionState.aiCompliance.status === 'testing' ? 'Testing...' : 'Test AI Connection'}
+            </Button>
+            {connectionState.aiCompliance.message && (
+              <span className={cn(
+                "text-sm",
+                connectionState.aiCompliance.status === 'success' ? "text-success" : "text-destructive"
+              )}>
+                {connectionState.aiCompliance.message}
+              </span>
+            )}
+          </div>
+        </CardContent>
+      </Card>
 
       {/* Brain API Configuration */}
       <Card className="border-border bg-card">
