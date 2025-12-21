@@ -4,7 +4,6 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Badge } from '@/components/ui/badge';
 import { useToast } from '@/hooks/use-toast';
 import { ProjectGate } from '@/components/common/ProjectGate';
 import { 
@@ -18,6 +17,8 @@ import {
   Server,
   Brain,
   ExternalLink,
+  Loader2,
+  Zap,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
@@ -40,11 +41,22 @@ interface APIConfig {
   llmModel: string;
 }
 
+type ConnectionStatus = 'idle' | 'testing' | 'success' | 'error';
+
+interface ConnectionState {
+  brain: { status: ConnectionStatus; message?: string };
+  llm: { status: ConnectionStatus; message?: string };
+}
+
 function SettingsContent() {
   const { toast } = useToast();
   const [showBrainToken, setShowBrainToken] = useState(false);
   const [showLlmKey, setShowLlmKey] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
+  const [connectionState, setConnectionState] = useState<ConnectionState>({
+    brain: { status: 'idle' },
+    llm: { status: 'idle' },
+  });
   
   const [config, setConfig] = useState<APIConfig>({
     brainApiUrl: '',
@@ -66,6 +78,138 @@ function SettingsContent() {
       }
     }
   }, []);
+
+  const testBrainConnection = async () => {
+    if (!config.brainApiUrl || !config.brainApiToken) {
+      toast({
+        title: 'Missing Configuration',
+        description: 'Please enter Brain API URL and token first.',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    setConnectionState(prev => ({ ...prev, brain: { status: 'testing' } }));
+
+    try {
+      const response = await fetch(`${config.brainApiUrl}/health`, {
+        method: 'GET',
+        headers: {
+          'Authorization': `Bearer ${config.brainApiToken}`,
+          'Content-Type': 'application/json',
+        },
+      });
+
+      if (response.ok) {
+        setConnectionState(prev => ({ 
+          ...prev, 
+          brain: { status: 'success', message: 'Connection successful!' } 
+        }));
+        toast({
+          title: 'Brain API Connected',
+          description: 'Successfully connected to the Brain API.',
+        });
+      } else {
+        const errorText = await response.text();
+        setConnectionState(prev => ({ 
+          ...prev, 
+          brain: { status: 'error', message: `Error: ${response.status} - ${errorText}` } 
+        }));
+        toast({
+          title: 'Connection Failed',
+          description: `Could not connect: ${response.status}`,
+          variant: 'destructive',
+        });
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Unknown error';
+      setConnectionState(prev => ({ 
+        ...prev, 
+        brain: { status: 'error', message } 
+      }));
+      toast({
+        title: 'Connection Failed',
+        description: message,
+        variant: 'destructive',
+      });
+    }
+  };
+
+  const testLlmConnection = async () => {
+    if (!config.llmApiKey) {
+      toast({
+        title: 'Missing API Key',
+        description: 'Please enter your LLM API key first.',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    setConnectionState(prev => ({ ...prev, llm: { status: 'testing' } }));
+
+    try {
+      let testUrl = '';
+      let headers: Record<string, string> = {};
+
+      switch (config.llmProvider) {
+        case 'openai':
+          testUrl = 'https://api.openai.com/v1/models';
+          headers = { 'Authorization': `Bearer ${config.llmApiKey}` };
+          break;
+        case 'anthropic':
+          testUrl = 'https://api.anthropic.com/v1/models';
+          headers = { 
+            'x-api-key': config.llmApiKey,
+            'anthropic-version': '2023-06-01',
+          };
+          break;
+        case 'google':
+          testUrl = `https://generativelanguage.googleapis.com/v1beta/models?key=${config.llmApiKey}`;
+          break;
+        default:
+          throw new Error('Unknown provider');
+      }
+
+      const response = await fetch(testUrl, {
+        method: 'GET',
+        headers,
+      });
+
+      if (response.ok) {
+        setConnectionState(prev => ({ 
+          ...prev, 
+          llm: { status: 'success', message: 'API key verified!' } 
+        }));
+        toast({
+          title: 'LLM Connected',
+          description: `Successfully connected to ${LLM_PROVIDERS.find(p => p.value === config.llmProvider)?.label}.`,
+        });
+      } else {
+        const errorData = await response.json().catch(() => ({}));
+        const errorMessage = errorData.error?.message || `HTTP ${response.status}`;
+        setConnectionState(prev => ({ 
+          ...prev, 
+          llm: { status: 'error', message: errorMessage } 
+        }));
+        toast({
+          title: 'Connection Failed',
+          description: errorMessage,
+          variant: 'destructive',
+        });
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Unknown error';
+      setConnectionState(prev => ({ 
+        ...prev, 
+        llm: { status: 'error', message } 
+      }));
+      toast({
+        title: 'Connection Failed',
+        description: message,
+        variant: 'destructive',
+      });
+    }
+  };
 
   const handleSave = async () => {
     setIsSaving(true);
@@ -96,6 +240,19 @@ function SettingsContent() {
   const isConfigured = config.brainApiUrl && config.brainApiToken;
   const isLlmConfigured = config.llmApiKey && config.llmModel;
 
+  const getStatusIcon = (status: ConnectionStatus) => {
+    switch (status) {
+      case 'testing':
+        return <Loader2 className="h-4 w-4 animate-spin" />;
+      case 'success':
+        return <CheckCircle2 className="h-4 w-4 text-success" />;
+      case 'error':
+        return <AlertCircle className="h-4 w-4 text-destructive" />;
+      default:
+        return <Zap className="h-4 w-4" />;
+    }
+  };
+
   return (
     <div className="space-y-8 max-w-2xl">
       {/* Header */}
@@ -110,15 +267,23 @@ function SettingsContent() {
       <div className="grid gap-4 sm:grid-cols-2">
         <Card className={cn(
           "border-2 transition-colors",
-          isConfigured ? "border-success/50 bg-success/5" : "border-warning/50 bg-warning/5"
+          connectionState.brain.status === 'success' ? "border-success/50 bg-success/5" :
+          connectionState.brain.status === 'error' ? "border-destructive/50 bg-destructive/5" :
+          isConfigured ? "border-primary/50 bg-primary/5" : "border-warning/50 bg-warning/5"
         )}>
           <CardContent className="p-4 flex items-center gap-3">
             <div className={cn(
               "flex h-10 w-10 items-center justify-center rounded-lg",
-              isConfigured ? "bg-success/10" : "bg-warning/10"
+              connectionState.brain.status === 'success' ? "bg-success/10" :
+              connectionState.brain.status === 'error' ? "bg-destructive/10" :
+              isConfigured ? "bg-primary/10" : "bg-warning/10"
             )}>
-              {isConfigured ? (
+              {connectionState.brain.status === 'success' ? (
                 <CheckCircle2 className="h-5 w-5 text-success" />
+              ) : connectionState.brain.status === 'error' ? (
+                <AlertCircle className="h-5 w-5 text-destructive" />
+              ) : isConfigured ? (
+                <CheckCircle2 className="h-5 w-5 text-primary" />
               ) : (
                 <AlertCircle className="h-5 w-5 text-warning" />
               )}
@@ -126,7 +291,9 @@ function SettingsContent() {
             <div>
               <p className="font-medium text-foreground">Brain API</p>
               <p className="text-sm text-muted-foreground">
-                {isConfigured ? 'Connected' : 'Not configured'}
+                {connectionState.brain.status === 'success' ? 'Verified' :
+                 connectionState.brain.status === 'error' ? 'Failed' :
+                 isConfigured ? 'Configured' : 'Not configured'}
               </p>
             </div>
           </CardContent>
@@ -134,15 +301,23 @@ function SettingsContent() {
         
         <Card className={cn(
           "border-2 transition-colors",
-          isLlmConfigured ? "border-success/50 bg-success/5" : "border-warning/50 bg-warning/5"
+          connectionState.llm.status === 'success' ? "border-success/50 bg-success/5" :
+          connectionState.llm.status === 'error' ? "border-destructive/50 bg-destructive/5" :
+          isLlmConfigured ? "border-primary/50 bg-primary/5" : "border-warning/50 bg-warning/5"
         )}>
           <CardContent className="p-4 flex items-center gap-3">
             <div className={cn(
               "flex h-10 w-10 items-center justify-center rounded-lg",
-              isLlmConfigured ? "bg-success/10" : "bg-warning/10"
+              connectionState.llm.status === 'success' ? "bg-success/10" :
+              connectionState.llm.status === 'error' ? "bg-destructive/10" :
+              isLlmConfigured ? "bg-primary/10" : "bg-warning/10"
             )}>
-              {isLlmConfigured ? (
+              {connectionState.llm.status === 'success' ? (
                 <CheckCircle2 className="h-5 w-5 text-success" />
+              ) : connectionState.llm.status === 'error' ? (
+                <AlertCircle className="h-5 w-5 text-destructive" />
+              ) : isLlmConfigured ? (
+                <CheckCircle2 className="h-5 w-5 text-primary" />
               ) : (
                 <AlertCircle className="h-5 w-5 text-warning" />
               )}
@@ -150,7 +325,9 @@ function SettingsContent() {
             <div>
               <p className="font-medium text-foreground">LLM Provider</p>
               <p className="text-sm text-muted-foreground">
-                {isLlmConfigured ? `${selectedProvider?.label} - ${config.llmModel}` : 'Not configured'}
+                {connectionState.llm.status === 'success' ? `${selectedProvider?.label} verified` :
+                 connectionState.llm.status === 'error' ? 'Failed' :
+                 isLlmConfigured ? `${selectedProvider?.label} - ${config.llmModel}` : 'Not configured'}
               </p>
             </div>
           </CardContent>
@@ -210,6 +387,27 @@ function SettingsContent() {
               Your API token for authenticating with the Brain service.
             </p>
           </div>
+
+          {/* Test Connection Button */}
+          <div className="flex items-center gap-3 pt-2">
+            <Button 
+              variant="outline" 
+              onClick={testBrainConnection}
+              disabled={connectionState.brain.status === 'testing' || !config.brainApiUrl || !config.brainApiToken}
+              className="gap-2"
+            >
+              {getStatusIcon(connectionState.brain.status)}
+              {connectionState.brain.status === 'testing' ? 'Testing...' : 'Test Connection'}
+            </Button>
+            {connectionState.brain.message && (
+              <span className={cn(
+                "text-sm",
+                connectionState.brain.status === 'success' ? "text-success" : "text-destructive"
+              )}>
+                {connectionState.brain.message}
+              </span>
+            )}
+          </div>
         </CardContent>
       </Card>
 
@@ -236,6 +434,8 @@ function SettingsContent() {
                   llmProvider: v,
                   llmModel: provider?.models[0] || ''
                 }));
+                // Reset connection state when provider changes
+                setConnectionState(prev => ({ ...prev, llm: { status: 'idle' } }));
               }}
             >
               <SelectTrigger id="llmProvider">
@@ -307,6 +507,27 @@ function SettingsContent() {
                 <>Get your API key from <a href="https://aistudio.google.com/app/apikey" target="_blank" rel="noopener noreferrer" className="text-primary hover:underline inline-flex items-center gap-1">Google AI Studio <ExternalLink className="h-3 w-3" /></a></>
               )}
             </p>
+          </div>
+
+          {/* Test Connection Button */}
+          <div className="flex items-center gap-3 pt-2">
+            <Button 
+              variant="outline" 
+              onClick={testLlmConnection}
+              disabled={connectionState.llm.status === 'testing' || !config.llmApiKey}
+              className="gap-2"
+            >
+              {getStatusIcon(connectionState.llm.status)}
+              {connectionState.llm.status === 'testing' ? 'Testing...' : 'Test Connection'}
+            </Button>
+            {connectionState.llm.message && (
+              <span className={cn(
+                "text-sm",
+                connectionState.llm.status === 'success' ? "text-success" : "text-destructive"
+              )}>
+                {connectionState.llm.message}
+              </span>
+            )}
           </div>
         </CardContent>
       </Card>
