@@ -1,18 +1,16 @@
 import { Link, useLocation } from 'react-router-dom';
 import { cn } from '@/lib/utils';
 import {
-  LayoutDashboard,
-  Link2,
   FolderOpen,
-  Search,
+  Link2,
+  Users,
   Rocket,
-  Zap,
   Activity,
   AlertTriangle,
   History,
   Settings,
   LogOut,
-  ChevronDown,
+  Zap,
 } from 'lucide-react';
 import { useProjectStore } from '@/stores/projectStore';
 import { Button } from '@/components/ui/button';
@@ -23,21 +21,20 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 
+// Simplified navigation: Assets → Ad Accounts → Audience → Publish
 const navItems = [
-  { path: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
+  { path: '/assets', label: 'Assets', icon: FolderOpen },
   { path: '/connections', label: 'Ad Accounts', icon: Link2 },
-  { path: '/assets', label: 'Asset Manager', icon: FolderOpen },
-  { path: '/analyze', label: 'Pre-Launch Analysis', icon: Search },
-  { path: '/launch', label: 'Launch Config', icon: Rocket },
-  { path: '/rules', label: 'Rules & Automation', icon: Zap },
-  { path: '/monitoring', label: 'Live Monitoring', icon: Activity },
-  { path: '/recovery', label: 'Disapproval Recovery', icon: AlertTriangle },
-  { path: '/history', label: 'History & Learning', icon: History },
+  { path: '/launch', label: 'Publish', icon: Rocket },
+  { path: '/rules', label: 'Automation', icon: Zap },
+  { path: '/monitoring', label: 'Monitoring', icon: Activity },
+  { path: '/recovery', label: 'Recovery', icon: AlertTriangle },
+  { path: '/history', label: 'History', icon: History },
 ];
 
 export function Sidebar() {
   const location = useLocation();
-  const { currentProject, projects, setCurrentProject, user, setUser } = useProjectStore();
+  const { user, setUser } = useProjectStore();
 
   const handleLogout = () => {
     setUser(null);
@@ -53,38 +50,6 @@ export function Sidebar() {
           </div>
           <span className="text-lg font-semibold text-sidebar-foreground">AdLaunch AI</span>
         </div>
-
-        {/* Project Selector */}
-        {projects.length > 0 && (
-          <div className="border-b border-sidebar-border p-4">
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button variant="outline" className="w-full justify-between">
-                  <span className="truncate">{currentProject?.name || 'Select Project'}</span>
-                  <ChevronDown className="h-4 w-4 shrink-0 opacity-50" />
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent className="w-56">
-                {projects.map((project) => (
-                  <DropdownMenuItem
-                    key={project.id}
-                    onClick={() => setCurrentProject(project)}
-                    className={cn(
-                      currentProject?.id === project.id && 'bg-accent'
-                    )}
-                  >
-                    {project.name}
-                  </DropdownMenuItem>
-                ))}
-                <DropdownMenuItem asChild>
-                  <Link to="/projects/new" className="text-primary">
-                    + Create New Project
-                  </Link>
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
-          </div>
-        )}
 
         {/* Navigation */}
         <nav className="flex-1 space-y-1 overflow-y-auto p-4">
@@ -131,12 +96,6 @@ export function Sidebar() {
                 </Button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end">
-                <DropdownMenuItem asChild>
-                  <Link to="/settings">
-                    <Settings className="mr-2 h-4 w-4" />
-                    Settings
-                  </Link>
-                </DropdownMenuItem>
                 <DropdownMenuItem onClick={handleLogout} className="text-destructive">
                   <LogOut className="mr-2 h-4 w-4" />
                   Logout
