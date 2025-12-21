@@ -8,13 +8,14 @@ import { DashboardLayout } from "@/components/layout/DashboardLayout";
 
 // Pages
 import Auth from "./pages/Auth";
+import Dashboard from "./pages/Dashboard";
 import Assets from "./pages/Assets";
 import Connections from "./pages/Connections";
 import Launch from "./pages/Launch";
+import Execution from "./pages/Execution";
 import Rules from "./pages/Rules";
 import Monitoring from "./pages/Monitoring";
 import Recovery from "./pages/Recovery";
-import History from "./pages/History";
 import Settings from "./pages/Settings";
 import NotFound from "./pages/NotFound";
 
@@ -34,8 +35,8 @@ function AuthRoute({ children }: { children: React.ReactNode }) {
   const { user } = useProjectStore();
   
   if (user) {
-    // Redirect to assets (campaign-first flow)
-    return <Navigate to="/assets" replace />;
+    // Redirect to dashboard (new entry point)
+    return <Navigate to="/dashboard" replace />;
   }
   
   return <>{children}</>;
@@ -59,7 +60,7 @@ const App = () => (
             }
           />
 
-          {/* Protected dashboard routes - campaign-first flow */}
+          {/* Protected dashboard routes - AI-first flow */}
           <Route
             element={
               <ProtectedRoute>
@@ -67,16 +68,17 @@ const App = () => (
               </ProtectedRoute>
             }
           >
+            <Route path="/dashboard" element={<Dashboard />} />
             <Route path="/assets" element={<Assets />} />
             <Route path="/connections" element={<Connections />} />
             <Route path="/launch" element={<Launch />} />
+            <Route path="/execution" element={<Execution />} />
             <Route path="/rules" element={<Rules />} />
             <Route path="/monitoring" element={<Monitoring />} />
             <Route path="/recovery" element={<Recovery />} />
-            <Route path="/history" element={<History />} />
             <Route path="/settings" element={<Settings />} />
             {/* Redirect old routes */}
-            <Route path="/dashboard" element={<Navigate to="/assets" replace />} />
+            <Route path="/history" element={<Navigate to="/execution" replace />} />
             <Route path="/analyze" element={<Navigate to="/assets" replace />} />
           </Route>
 

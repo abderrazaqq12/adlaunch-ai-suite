@@ -1,16 +1,16 @@
 import { Link, useLocation } from 'react-router-dom';
 import { cn } from '@/lib/utils';
 import {
+  LayoutDashboard,
   FolderOpen,
   Link2,
-  Users,
   Rocket,
   Activity,
   AlertTriangle,
-  History,
+  Zap,
+  Eye,
   Settings,
   LogOut,
-  Zap,
 } from 'lucide-react';
 import { useProjectStore } from '@/stores/projectStore';
 import { Button } from '@/components/ui/button';
@@ -21,15 +21,19 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 
-// Simplified navigation: Assets → Ad Accounts → Audience → Publish
+// UX Flow: Dashboard → Assets → Accounts → Publish → Execution → Monitoring → Recovery → Automation
 const navItems = [
-  { path: '/assets', label: 'Assets', icon: FolderOpen },
+  { path: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
+  { path: '/assets', label: 'Asset Manager', icon: FolderOpen },
   { path: '/connections', label: 'Ad Accounts', icon: Link2 },
   { path: '/launch', label: 'Publish', icon: Rocket },
-  { path: '/rules', label: 'Automation', icon: Zap },
+  { path: '/execution', label: 'AI Execution', icon: Eye },
   { path: '/monitoring', label: 'Monitoring', icon: Activity },
   { path: '/recovery', label: 'Recovery', icon: AlertTriangle },
-  { path: '/history', label: 'History', icon: History },
+  { path: '/rules', label: 'Automation', icon: Zap },
+];
+
+const bottomNavItems = [
   { path: '/settings', label: 'Settings', icon: Settings },
 ];
 
@@ -52,9 +56,34 @@ export function Sidebar() {
           <span className="text-lg font-semibold text-sidebar-foreground">AdLaunch AI</span>
         </div>
 
-        {/* Navigation */}
+        {/* Main Navigation */}
         <nav className="flex-1 space-y-1 overflow-y-auto p-4">
           {navItems.map((item) => {
+            const isActive = location.pathname === item.path;
+            const Icon = item.icon;
+            
+            return (
+              <Link
+                key={item.path}
+                to={item.path}
+                className={cn(
+                  'flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors',
+                  isActive
+                    ? 'bg-sidebar-accent text-sidebar-accent-foreground'
+                    : 'text-sidebar-foreground/70 hover:bg-sidebar-accent/50 hover:text-sidebar-foreground'
+                )}
+              >
+                <Icon className="h-4 w-4" />
+                {item.label}
+              </Link>
+            );
+          })}
+
+          {/* Divider */}
+          <div className="my-4 border-t border-sidebar-border" />
+
+          {/* Bottom nav items */}
+          {bottomNavItems.map((item) => {
             const isActive = location.pathname === item.path;
             const Icon = item.icon;
             
