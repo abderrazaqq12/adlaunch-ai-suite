@@ -6,7 +6,7 @@ const corsHeaders = {
 };
 
 /**
- * AUTOMATION RULE STATE MACHINE
+ * AUTOMATION RULE STATE MACHINE with STATE GUARDS
  * 
  * States:
  * - DISABLED: Rule is off
@@ -14,12 +14,104 @@ const corsHeaders = {
  * - COOLDOWN: Rule triggered recently, waiting cooldown period
  * - ERROR: Rule has an error (bad config, etc.)
  * 
- * Scope: CAMPAIGN, ADSET, AD
+ * GUARDS for ACTION_EXECUTION:
+ * - campaign.state NOT IN ["RECOVERY", "USER_PAUSED", "STOPPED", "DISAPPROVED"]
+ * - cooldownExpired === true
+ * - maxActionsPerDay NOT exceeded
  */
 
 type RuleState = 'DISABLED' | 'ACTIVE' | 'COOLDOWN' | 'ERROR';
 type RuleScope = 'CAMPAIGN' | 'ADSET' | 'AD';
-type RuleAction = 'ENABLE' | 'DISABLE' | 'EDIT' | 'DELETE' | 'RESET_COOLDOWN';
+type RuleAction = 'ENABLE' | 'DISABLE' | 'EDIT' | 'DELETE' | 'RESET_COOLDOWN' | 'EXECUTE';
+
+// Campaign states that block automation
+const BLOCKED_CAMPAIGN_STATES = ['RECOVERY', 'USER_PAUSED', 'STOPPED', 'DISAPPROVED'];
+
+// ============================================================================
+// PURE GUARD FUNCTIONS
+// ============================================================================
+
+interface GuardResult {
+  allowed: boolean;
+  reason?: string;
+}
+
+interface AutomationActionGuardInput {
+  rule: {
+    id: string;
+    state: string;
+    cooldownMinutes: number;
+    lastTriggeredAt?: string | null;
+    actionsToday?: number;
+    maxActionsPerDay?: number;
+  };
+  campaign: {
+    id: string;
+    state: string;
+  };
+}
+
+interface AutomationGuardConfig {
+  maxActionsPerDay: number;
+}
+
+/**
+ * AUTOMATION → ACTION_EXECUTION Guard (Pure Function)
+ */
+function guardAutomationAction(
+  input: AutomationActionGuardInput,
+  config: AutomationGuardConfig = { maxActionsPerDay: 10 }
+): GuardResult {
+  // Guard 1: Campaign state must allow automation
+  if (BLOCKED_CAMPAIGN_STATES.includes(input.campaign.state)) {
+    return {
+      allowed: false,
+      reason: `Campaign in ${input.campaign.state} state blocks automation actions`,
+    };
+  }
+
+  // Guard 2: Rule must be ACTIVE
+  if (input.rule.state !== 'ACTIVE') {
+    return {
+      allowed: false,
+      reason: `Rule must be ACTIVE to execute. Current state: ${input.rule.state}`,
+    };
+  }
+
+  // Guard 3: Cooldown must be expired
+  if (input.rule.lastTriggeredAt) {
+    const lastTriggered = new Date(input.rule.lastTriggeredAt);
+    const cooldownMs = input.rule.cooldownMinutes * 60 * 1000;
+    const cooldownEnds = new Date(lastTriggered.getTime() + cooldownMs);
+    const now = new Date();
+    
+    if (now < cooldownEnds) {
+      const remainingMs = cooldownEnds.getTime() - now.getTime();
+      const remainingMins = Math.ceil(remainingMs / 60000);
+      return {
+        allowed: false,
+        reason: `Rule in cooldown. ${remainingMins} minute(s) remaining`,
+      };
+    }
+  }
+
+  // Guard 4: Max actions per day not exceeded
+  const actionsToday = input.rule.actionsToday || 0;
+  const maxActions = input.rule.maxActionsPerDay || config.maxActionsPerDay;
+  
+  if (actionsToday >= maxActions) {
+    return {
+      allowed: false,
+      reason: `Daily action limit reached (${actionsToday}/${maxActions})`,
+    };
+  }
+
+  return { allowed: true };
+}
+
+// ============================================================================
+// STATE MACHINE CONFIGURATION
+// ============================================================================
 
 interface RuleStateConfig {
   allowedActions: RuleAction[];
@@ -32,7 +124,7 @@ const RULE_STATE_CONFIG: Record<RuleState, RuleStateConfig> = {
     canTransitionTo: ['ACTIVE'],
   },
   ACTIVE: {
-    allowedActions: ['DISABLE', 'EDIT'],
+    allowedActions: ['DISABLE', 'EDIT', 'EXECUTE'],
     canTransitionTo: ['DISABLED', 'COOLDOWN', 'ERROR'],
   },
   COOLDOWN: {
@@ -53,10 +145,38 @@ function isActionAllowed(state: RuleState, action: RuleAction): boolean {
   return getAllowedActions(state).includes(action);
 }
 
+// Blocked event log
+const blockedEvents: any[] = [];
+
+function logBlockedEvent(
+  entityId: string,
+  action: string,
+  reason: string,
+  guardName: string,
+  context?: Record<string, unknown>
+) {
+  const event = {
+    id: `blocked_${Date.now()}`,
+    type: 'GUARD_BLOCKED',
+    entity: 'RULE',
+    entityId,
+    action,
+    reason,
+    metadata: { guardName, ...context },
+    timestamp: new Date().toISOString(),
+  };
+  blockedEvents.push(event);
+  console.log(`[automation] GUARD_BLOCKED: ${guardName} - ${reason}`);
+  return event;
+}
+
 // Mock database
 const mockRules: Map<string, any> = new Map();
 
-// Initialize with sample rules
+// Mock campaigns for guard validation
+const mockCampaigns: Map<string, any> = new Map();
+
+// Initialize with sample data
 mockRules.set('rule_1', {
   id: 'rule_1',
   name: 'Pause High CPA Ads',
@@ -66,6 +186,8 @@ mockRules.set('rule_1', {
   state: 'ACTIVE',
   cooldownMinutes: 60,
   lastTriggeredAt: null,
+  actionsToday: 0,
+  maxActionsPerDay: 10,
   createdAt: new Date().toISOString(),
   updatedAt: new Date().toISOString(),
 });
@@ -79,6 +201,8 @@ mockRules.set('rule_2', {
   state: 'DISABLED',
   cooldownMinutes: 120,
   lastTriggeredAt: null,
+  actionsToday: 0,
+  maxActionsPerDay: 5,
   createdAt: new Date().toISOString(),
   updatedAt: new Date().toISOString(),
 });
@@ -91,11 +215,33 @@ mockRules.set('rule_3', {
   action: { type: 'STOP' },
   state: 'COOLDOWN',
   cooldownMinutes: 30,
-  lastTriggeredAt: new Date(Date.now() - 15 * 60 * 1000).toISOString(), // 15 mins ago
-  cooldownEndsAt: new Date(Date.now() + 15 * 60 * 1000).toISOString(), // 15 mins from now
+  lastTriggeredAt: new Date(Date.now() - 15 * 60 * 1000).toISOString(),
+  cooldownEndsAt: new Date(Date.now() + 15 * 60 * 1000).toISOString(),
+  actionsToday: 3,
+  maxActionsPerDay: 10,
   createdAt: new Date().toISOString(),
   updatedAt: new Date().toISOString(),
 });
+
+mockRules.set('rule_4', {
+  id: 'rule_4',
+  name: 'Daily Limit Test',
+  scope: 'AD',
+  condition: { metric: 'cpc', operator: '>', value: 2 },
+  action: { type: 'PAUSE' },
+  state: 'ACTIVE',
+  cooldownMinutes: 30,
+  lastTriggeredAt: null,
+  actionsToday: 10,
+  maxActionsPerDay: 10, // Already at limit
+  createdAt: new Date().toISOString(),
+  updatedAt: new Date().toISOString(),
+});
+
+// Mock campaigns
+mockCampaigns.set('camp_1', { id: 'camp_1', state: 'ACTIVE' });
+mockCampaigns.set('camp_2', { id: 'camp_2', state: 'USER_PAUSED' }); // Blocked state
+mockCampaigns.set('camp_3', { id: 'camp_3', state: 'RECOVERY' }); // Blocked state
 
 serve(async (req) => {
   if (req.method === 'OPTIONS') {
@@ -120,6 +266,8 @@ serve(async (req) => {
         cooldownMinutes: rule.cooldownMinutes,
         lastTriggeredAt: rule.lastTriggeredAt,
         cooldownEndsAt: rule.cooldownEndsAt,
+        actionsToday: rule.actionsToday,
+        maxActionsPerDay: rule.maxActionsPerDay,
         allowedActions: getAllowedActions(rule.state),
       }));
 
@@ -151,9 +299,8 @@ serve(async (req) => {
     // POST /automation/rules - Create new rule
     if (req.method === 'POST' && pathParts.length === 2 && pathParts[1] === 'rules') {
       const body = await req.json();
-      const { name, scope, condition, action, cooldownMinutes } = body;
+      const { name, scope, condition, action, cooldownMinutes, maxActionsPerDay } = body;
 
-      // Validate required fields
       if (!name || !scope || !condition || !action) {
         return new Response(JSON.stringify({ 
           error: 'Missing required fields: name, scope, condition, action' 
@@ -181,10 +328,12 @@ serve(async (req) => {
         scope,
         condition,
         action,
-        state: 'DISABLED' as RuleState, // Always start disabled
+        state: 'DISABLED' as RuleState,
         cooldownMinutes: cooldownMinutes || 60,
+        maxActionsPerDay: maxActionsPerDay || 10,
         lastTriggeredAt: null,
         cooldownEndsAt: null,
+        actionsToday: 0,
         createdAt: now,
         updatedAt: now,
       };
@@ -201,7 +350,116 @@ serve(async (req) => {
       });
     }
 
-    // POST /automation/rules/{id}/enable - Enable rule
+    // POST /automation/rules/{id}/execute - Execute rule action (WITH GUARDS)
+    if (req.method === 'POST' && pathParts.length === 4 && pathParts[1] === 'rules' && pathParts[3] === 'execute') {
+      const ruleId = pathParts[2];
+      const body = await req.json();
+      const { campaignId } = body;
+
+      const rule = mockRules.get(ruleId);
+      if (!rule) {
+        return new Response(JSON.stringify({ error: 'Rule not found' }), {
+          status: 404,
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        });
+      }
+
+      // Get campaign for guard validation
+      const campaign = mockCampaigns.get(campaignId);
+      if (!campaign) {
+        return new Response(JSON.stringify({ error: 'Campaign not found' }), {
+          status: 404,
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        });
+      }
+
+      // STATE MACHINE CHECK
+      if (!isActionAllowed(rule.state, 'EXECUTE')) {
+        logBlockedEvent(ruleId, 'EXECUTE', `Action not allowed in ${rule.state} state`, 'STATE_MACHINE');
+        return new Response(JSON.stringify({
+          error: 'INVALID_TRANSITION',
+          message: `Cannot execute rule in ${rule.state} state`,
+          currentState: rule.state,
+          allowedActions: getAllowedActions(rule.state),
+        }), {
+          status: 403,
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        });
+      }
+
+      // RUN AUTOMATION ACTION GUARD (Pure function)
+      const guardResult = guardAutomationAction(
+        {
+          rule: {
+            id: rule.id,
+            state: rule.state,
+            cooldownMinutes: rule.cooldownMinutes,
+            lastTriggeredAt: rule.lastTriggeredAt,
+            actionsToday: rule.actionsToday,
+            maxActionsPerDay: rule.maxActionsPerDay,
+          },
+          campaign: {
+            id: campaign.id,
+            state: campaign.state,
+          },
+        },
+        { maxActionsPerDay: rule.maxActionsPerDay || 10 }
+      );
+
+      if (!guardResult.allowed) {
+        // Log BLOCKED_EVENT
+        logBlockedEvent(
+          ruleId,
+          'EXECUTE',
+          guardResult.reason!,
+          'guardAutomationAction',
+          { 
+            campaignId, 
+            campaignState: campaign.state,
+            actionsToday: rule.actionsToday,
+            maxActionsPerDay: rule.maxActionsPerDay,
+          }
+        );
+
+        return new Response(JSON.stringify({
+          error: 'GUARD_BLOCKED',
+          guardName: 'guardAutomationAction',
+          message: guardResult.reason,
+          currentState: rule.state,
+          campaignState: campaign.state,
+          allowedActions: getAllowedActions(rule.state),
+        }), {
+          status: 403,
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        });
+      }
+
+      // All guards passed - execute action
+      const now = new Date();
+      rule.lastTriggeredAt = now.toISOString();
+      rule.cooldownEndsAt = new Date(now.getTime() + rule.cooldownMinutes * 60 * 1000).toISOString();
+      rule.state = 'COOLDOWN';
+      rule.actionsToday = (rule.actionsToday || 0) + 1;
+      rule.updatedAt = now.toISOString();
+      mockRules.set(ruleId, rule);
+
+      console.log(`[automation] Executed rule ${ruleId} on campaign ${campaignId} (guards passed)`);
+
+      return new Response(JSON.stringify({
+        success: true,
+        ruleId,
+        campaignId,
+        action: rule.action,
+        state: rule.state,
+        cooldownEndsAt: rule.cooldownEndsAt,
+        actionsToday: rule.actionsToday,
+        allowedActions: getAllowedActions(rule.state),
+      }), {
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
+
+    // POST /automation/rules/{id}/enable
     if (req.method === 'POST' && pathParts.length === 4 && pathParts[1] === 'rules' && pathParts[3] === 'enable') {
       const ruleId = pathParts[2];
       const rule = mockRules.get(ruleId);
@@ -214,6 +472,7 @@ serve(async (req) => {
       }
 
       if (!isActionAllowed(rule.state, 'ENABLE')) {
+        logBlockedEvent(ruleId, 'ENABLE', `Action not allowed in ${rule.state} state`, 'STATE_MACHINE');
         return new Response(JSON.stringify({
           error: 'INVALID_TRANSITION',
           message: `Cannot enable rule in ${rule.state} state`,
@@ -238,7 +497,7 @@ serve(async (req) => {
       });
     }
 
-    // POST /automation/rules/{id}/disable - Disable rule
+    // POST /automation/rules/{id}/disable
     if (req.method === 'POST' && pathParts.length === 4 && pathParts[1] === 'rules' && pathParts[3] === 'disable') {
       const ruleId = pathParts[2];
       const rule = mockRules.get(ruleId);
@@ -251,6 +510,7 @@ serve(async (req) => {
       }
 
       if (!isActionAllowed(rule.state, 'DISABLE')) {
+        logBlockedEvent(ruleId, 'DISABLE', `Action not allowed in ${rule.state} state`, 'STATE_MACHINE');
         return new Response(JSON.stringify({
           error: 'INVALID_TRANSITION',
           message: `Cannot disable rule in ${rule.state} state`,
@@ -276,7 +536,7 @@ serve(async (req) => {
       });
     }
 
-    // POST /automation/rules/{id}/reset-cooldown - Reset cooldown
+    // POST /automation/rules/{id}/reset-cooldown
     if (req.method === 'POST' && pathParts.length === 4 && pathParts[1] === 'rules' && pathParts[3] === 'reset-cooldown') {
       const ruleId = pathParts[2];
       const rule = mockRules.get(ruleId);
@@ -289,6 +549,7 @@ serve(async (req) => {
       }
 
       if (!isActionAllowed(rule.state, 'RESET_COOLDOWN')) {
+        logBlockedEvent(ruleId, 'RESET_COOLDOWN', `Action not allowed in ${rule.state} state`, 'STATE_MACHINE');
         return new Response(JSON.stringify({
           error: 'INVALID_TRANSITION',
           message: `Cannot reset cooldown in ${rule.state} state`,
@@ -314,7 +575,7 @@ serve(async (req) => {
       });
     }
 
-    // DELETE /automation/rules/{id} - Delete rule
+    // DELETE /automation/rules/{id}
     if (req.method === 'DELETE' && pathParts.length === 3 && pathParts[1] === 'rules') {
       const ruleId = pathParts[2];
       const rule = mockRules.get(ruleId);
@@ -327,6 +588,7 @@ serve(async (req) => {
       }
 
       if (!isActionAllowed(rule.state, 'DELETE')) {
+        logBlockedEvent(ruleId, 'DELETE', `Action not allowed in ${rule.state} state`, 'STATE_MACHINE');
         return new Response(JSON.stringify({
           error: 'INVALID_TRANSITION',
           message: `Cannot delete rule in ${rule.state} state. Disable it first.`,
@@ -342,6 +604,13 @@ serve(async (req) => {
       console.log(`[automation] Deleted rule ${ruleId}`);
 
       return new Response(JSON.stringify({ success: true, deletedId: ruleId }), {
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
+
+    // GET /automation/blocked-events - Get blocked event log
+    if (req.method === 'GET' && pathParts.length === 2 && pathParts[1] === 'blocked-events') {
+      return new Response(JSON.stringify({ events: blockedEvents }), {
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       });
     }
