@@ -16,6 +16,9 @@ import { ExecutionStatusBadge } from '@/components/common/ExecutionStatusBadge';
 import { LaunchConfirmationDialog } from '@/components/launch/LaunchConfirmationDialog';
 import { useExecutionReadiness } from '@/hooks/useExecutionReadiness';
 import { brainClient, BrainClientError } from '@/lib/api';
+import { MultiSelectCombobox } from '@/components/ui/multi-select-combobox';
+import { COUNTRIES } from '@/lib/data/countries';
+import { LANGUAGES } from '@/lib/data/languages';
 import type { 
   Platform, 
   Campaign, 
@@ -49,37 +52,6 @@ import { cn } from '@/lib/utils';
 
 // Fixed objective - Conversion only
 const FIXED_OBJECTIVE: CampaignObjective = 'conversion';
-
-const COUNTRIES = [
-  { value: 'US', label: 'United States' },
-  { value: 'UK', label: 'United Kingdom' },
-  { value: 'CA', label: 'Canada' },
-  { value: 'AU', label: 'Australia' },
-  { value: 'DE', label: 'Germany' },
-  { value: 'FR', label: 'France' },
-  { value: 'ES', label: 'Spain' },
-  { value: 'IT', label: 'Italy' },
-  { value: 'NL', label: 'Netherlands' },
-  { value: 'JP', label: 'Japan' },
-  { value: 'KR', label: 'South Korea' },
-  { value: 'BR', label: 'Brazil' },
-  { value: 'MX', label: 'Mexico' },
-  { value: 'IN', label: 'India' },
-];
-
-const LANGUAGES = [
-  { value: 'en', label: 'English' },
-  { value: 'es', label: 'Spanish' },
-  { value: 'fr', label: 'French' },
-  { value: 'de', label: 'German' },
-  { value: 'it', label: 'Italian' },
-  { value: 'pt', label: 'Portuguese' },
-  { value: 'ja', label: 'Japanese' },
-  { value: 'ko', label: 'Korean' },
-  { value: 'zh', label: 'Chinese' },
-  { value: 'ar', label: 'Arabic' },
-  { value: 'hi', label: 'Hindi' },
-];
 
 type WizardStep = 'assets' | 'accounts' | 'audience' | 'preview';
 
@@ -699,56 +671,50 @@ function LaunchContent() {
         </CardContent>
       </Card>
 
-      {/* Countries - Multi-select */}
+      {/* Countries - Searchable Multi-select */}
       <Card className="border-border bg-card">
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
             <Globe className="h-5 w-5" />
             Target Countries *
           </CardTitle>
-          <CardDescription>Select one or more countries</CardDescription>
+          <CardDescription>Search and select one or more countries</CardDescription>
         </CardHeader>
         <CardContent>
-          <div className="flex flex-wrap gap-2">
-            {COUNTRIES.map(country => (
-              <Badge
-                key={country.value}
-                variant={audience.countries.includes(country.value) ? 'default' : 'outline'}
-                className="cursor-pointer px-3 py-1.5"
-                onClick={() => toggleCountry(country.value)}
-              >
-                {country.label}
-              </Badge>
-            ))}
-          </div>
+          <MultiSelectCombobox
+            options={COUNTRIES}
+            selected={audience.countries}
+            onChange={(countries) => setAudience(prev => ({ ...prev, countries }))}
+            placeholder="Select countries..."
+            searchPlaceholder="Search countries..."
+            emptyMessage="No countries found."
+            maxDisplayed={5}
+          />
           {audience.countries.length === 0 && (
             <p className="text-sm text-destructive mt-2">Select at least one country</p>
           )}
         </CardContent>
       </Card>
 
-      {/* Languages - Multi-select */}
+      {/* Languages - Searchable Multi-select */}
       <Card className="border-border bg-card">
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
             <Languages className="h-5 w-5" />
             Target Languages *
           </CardTitle>
-          <CardDescription>Select one or more languages</CardDescription>
+          <CardDescription>Search and select one or more languages</CardDescription>
         </CardHeader>
         <CardContent>
-          <div className="flex flex-wrap gap-2">
-            {LANGUAGES.map(lang => (
-              <Badge
-                key={lang.value}
-                variant={audience.languages.includes(lang.value) ? 'default' : 'outline'}
-                className="cursor-pointer px-3 py-1.5"
-                onClick={() => toggleLanguage(lang.value)}
-              >
-                {lang.label}
-              </Badge>
-            ))}
-          </div>
+          <MultiSelectCombobox
+            options={LANGUAGES}
+            selected={audience.languages}
+            onChange={(languages) => setAudience(prev => ({ ...prev, languages }))}
+            placeholder="Select languages..."
+            searchPlaceholder="Search languages..."
+            emptyMessage="No languages found."
+            maxDisplayed={5}
+          />
           {audience.languages.length === 0 && (
             <p className="text-sm text-destructive mt-2">Select at least one language</p>
           )}
