@@ -57,21 +57,19 @@ export interface CampaignExecutionReadiness {
 // ============================================
 
 // High-level objectives (platform-agnostic)
-export type CampaignObjective = 'conversion' | 'video_views';
+// FIXED: Only Conversion (Sales) objective supported
+export type CampaignObjective = 'conversion';
 
 // Platform-specific objective mappings
 export const PLATFORM_OBJECTIVE_NAMES: Record<Platform, Record<CampaignObjective, string>> = {
   google: {
     conversion: 'Sales / Website Conversions',
-    video_views: 'Video Engagement',
   },
   tiktok: {
     conversion: 'Conversion',
-    video_views: 'Video Views',
   },
   snapchat: {
     conversion: 'Conversion',
-    video_views: 'Video Views',
   },
 };
 
@@ -105,6 +103,7 @@ export interface AudienceTarget {
   ageMin: number;
   ageMax: number;
   gender: 'all' | 'male' | 'female';
+  languages: string[];
 }
 
 // Selected accounts per platform
@@ -196,16 +195,10 @@ export interface Asset {
   name: string;
   url?: string;
   content?: string;
-  tags: AssetTag[];
-  platforms: Platform[];
   createdAt: string;
   status: AssetStatus;
   analysisResult?: AssetAnalysisResult;
-}
-
-export interface AssetTag {
-  type: 'hook' | 'emotion' | 'offer' | 'platform';
-  value: string;
+  rejectionReasons?: string[];
 }
 
 export interface AnalysisResult {
