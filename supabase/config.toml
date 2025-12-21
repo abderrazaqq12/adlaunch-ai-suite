@@ -1,1 +1,4 @@
 project_id = "fzngibjbhrirkdbpxmii"
+
+[functions.analyze-asset]
+verify_jwt = false

@@ -15,12 +15,17 @@ import type {
   AutomationRule,
 } from '@/types';
 
+import { supabase } from '@/integrations/supabase/client';
+
 // ============================================
 // CONFIGURATION
 // ============================================
 
 const BRAIN_API_BASE_URL = import.meta.env.VITE_BRAIN_API_BASE_URL || '';
 const BRAIN_API_TOKEN = import.meta.env.VITE_BRAIN_API_TOKEN || '';
+
+// Supabase Edge Function URL for AI analysis
+const SUPABASE_FUNCTIONS_URL = 'https://fzngibjbhrirkdbpxmii.supabase.co/functions/v1';
 
 // ============================================
 // ERROR HANDLING
@@ -532,51 +537,41 @@ export const brainClient = {
     projectId: string,
     request: AnalyzeAssetRequest
   ): Promise<AnalyzeAssetResponse> {
-    if (!BRAIN_API_BASE_URL) {
-      console.warn('[BrainClient] No API URL configured, using fallback');
-      
-      // Simulate AI analysis with realistic decision logic
-      await new Promise(resolve => setTimeout(resolve, 1500 + Math.random() * 1000));
-      
-      const policyRiskScore = Math.floor(Math.random() * 100);
-      const creativeQualityScore = 40 + Math.floor(Math.random() * 60);
-      const approved = policyRiskScore < 50 && creativeQualityScore > 50;
-      
-      const possibleIssues: ComplianceIssue[] = [
-        { severity: 'high', category: 'policy', message: 'Text overlay exceeds 20% of video frame', recommendation: 'Reduce text size or move to caption area' },
-        { severity: 'critical', category: 'content', message: 'Audio contains copyrighted music', recommendation: 'Replace with royalty-free audio' },
-        { severity: 'medium', category: 'policy', message: 'Misleading claims detected in ad copy', recommendation: 'Remove or substantiate claims with evidence' },
-        { severity: 'high', category: 'content', message: 'Prohibited product category detected', recommendation: 'Review platform advertising policies' },
-        { severity: 'low', category: 'creative', message: 'Low visual contrast may reduce engagement', recommendation: 'Increase contrast for better visibility' },
-        { severity: 'medium', category: 'technical', message: 'Video resolution below recommended quality', recommendation: 'Upload higher resolution version (1080p+)' },
-      ];
-      
-      const issues = approved 
-        ? [] 
-        : possibleIssues.slice(0, 1 + Math.floor(Math.random() * 2));
-      
-      const rejectionReasons = issues
-        .filter(i => i.severity === 'high' || i.severity === 'critical')
-        .map(i => i.message);
+    console.log('[BrainClient] Analyzing asset via Supabase Edge Function:', request.asset.id);
+    
+    try {
+      const response = await fetch(`${SUPABASE_FUNCTIONS_URL}/analyze-asset`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ asset: request.asset }),
+      });
 
-      return {
-        assetId: request.asset.id,
-        approved,
-        policyRiskScore,
-        creativeQualityScore,
-        issues,
-        rejectionReasons,
-        analyzedAt: new Date().toISOString(),
-      };
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({ error: 'Unknown error' }));
+        console.error('[BrainClient] Edge function error:', errorData);
+        throw new BrainClientError({
+          error: 'AI_ANALYSIS_ERROR',
+          message: errorData.error || `Analysis failed with status ${response.status}`,
+        });
+      }
+
+      const result = await response.json();
+      console.log('[BrainClient] Analysis complete:', result.assetId, result.approved ? 'APPROVED' : 'REJECTED');
+      return result;
+    } catch (error) {
+      console.error('[BrainClient] analyzeAsset error:', error);
+      
+      if (error instanceof BrainClientError) {
+        throw error;
+      }
+      
+      throw new BrainClientError({
+        error: 'AI_ANALYSIS_ERROR',
+        message: error instanceof Error ? error.message : 'AI analysis failed',
+      });
     }
-
-    const response = await fetch(`${BRAIN_API_BASE_URL}/v1/compliance/analyze`, {
-      method: 'POST',
-      headers: buildHeaders(projectId),
-      body: JSON.stringify(request),
-    });
-
-    return handleResponse<AnalyzeAssetResponse>(response);
   },
 
   /**
@@ -586,34 +581,41 @@ export const brainClient = {
     projectId: string,
     request: AnalyzeBatchRequest
   ): Promise<AnalyzeBatchResponse> {
-    if (!BRAIN_API_BASE_URL) {
-      console.warn('[BrainClient] No API URL configured, using fallback');
+    console.log('[BrainClient] Analyzing batch via Supabase Edge Function:', request.assets.length, 'assets');
+    
+    try {
+      const response = await fetch(`${SUPABASE_FUNCTIONS_URL}/analyze-asset`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ assets: request.assets }),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({ error: 'Unknown error' }));
+        console.error('[BrainClient] Edge function batch error:', errorData);
+        throw new BrainClientError({
+          error: 'AI_ANALYSIS_ERROR',
+          message: errorData.error || `Batch analysis failed with status ${response.status}`,
+        });
+      }
+
+      const result = await response.json();
+      console.log('[BrainClient] Batch analysis complete:', result.summary);
+      return result;
+    } catch (error) {
+      console.error('[BrainClient] analyzeAssetBatch error:', error);
       
-      // Analyze each asset individually
-      const results: AnalyzeAssetResponse[] = [];
-      
-      for (const asset of request.assets) {
-        const result = await this.analyzeAsset(projectId, { asset });
-        results.push(result);
+      if (error instanceof BrainClientError) {
+        throw error;
       }
       
-      return {
-        results,
-        summary: {
-          total: results.length,
-          approved: results.filter(r => r.approved).length,
-          rejected: results.filter(r => !r.approved).length,
-        },
-      };
+      throw new BrainClientError({
+        error: 'AI_ANALYSIS_ERROR',
+        message: error instanceof Error ? error.message : 'Batch AI analysis failed',
+      });
     }
-
-    const response = await fetch(`${BRAIN_API_BASE_URL}/v1/compliance/analyze-batch`, {
-      method: 'POST',
-      headers: buildHeaders(projectId),
-      body: JSON.stringify(request),
-    });
-
-    return handleResponse<AnalyzeBatchResponse>(response);
   },
 };
 
