@@ -15,6 +15,7 @@ import Rules from "./pages/Rules";
 import Monitoring from "./pages/Monitoring";
 import Recovery from "./pages/Recovery";
 import History from "./pages/History";
+import Settings from "./pages/Settings";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
@@ -73,6 +74,7 @@ const App = () => (
             <Route path="/monitoring" element={<Monitoring />} />
             <Route path="/recovery" element={<Recovery />} />
             <Route path="/history" element={<History />} />
+            <Route path="/settings" element={<Settings />} />
             {/* Redirect old routes */}
             <Route path="/dashboard" element={<Navigate to="/assets" replace />} />
             <Route path="/analyze" element={<Navigate to="/assets" replace />} />
