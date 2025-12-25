@@ -1,342 +1,17 @@
-import { useState } from 'react';
-import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { StatusBadge } from '@/components/common/StatusBadge';
 import { useProjectStore } from '@/stores/projectStore';
-import { useToast } from '@/hooks/use-toast';
-import { brainClient, BrainClientError } from '@/lib/api';
-import type { Platform, AdAccountConnection, PlatformPermissions } from '@/types';
-import { Check, X, AlertTriangle, Link2, ExternalLink, RefreshCw, Plus, Trash2 } from 'lucide-react';
-import { cn } from '@/lib/utils';
-
-const platformDetails: Record<Platform, { 
-  name: string; 
-  icon: string;
-  gradient: string;
-  description: string;
-}> = {
-  google: {
-    name: 'Google Ads',
-    icon: '🔍',
-    gradient: 'from-google via-google-red to-google-yellow',
-    description: 'Connect your Google Ads account to launch and optimize search, display, and YouTube campaigns.',
-  },
-  tiktok: {
-    name: 'TikTok Ads',
-    icon: '🎵',
-    gradient: 'from-tiktok to-tiktok-pink',
-    description: 'Connect your TikTok Ads Manager to reach Gen Z and Millennial audiences with video ads.',
-  },
-  snapchat: {
-    name: 'Snapchat Ads',
-    icon: '👻',
-    gradient: 'from-snapchat to-yellow-300',
-    description: 'Connect your Snapchat Ads account to create immersive AR and video experiences.',
-  },
-};
-
-function PermissionIndicator({ label, allowed }: { label: string; allowed: boolean }) {
-  return (
-    <div className="flex items-center gap-2">
-      {allowed ? (
-        <Check className="h-4 w-4 text-success" />
-      ) : (
-        <X className="h-4 w-4 text-destructive" />
-      )}
-      <span className={cn(
-        'text-sm',
-        allowed ? 'text-foreground' : 'text-muted-foreground'
-      )}>
-        {label}
-      </span>
-    </div>
-  );
-}
-
-function AccountItem({ 
-  connection, 
-  onDisconnect,
-  onRefresh,
-}: { 
-  connection: AdAccountConnection; 
-  onDisconnect: () => void;
-  onRefresh: () => void;
-}) {
-  const [isRefreshing, setIsRefreshing] = useState(false);
-
-  const handleRefresh = async () => {
-    setIsRefreshing(true);
-    await onRefresh();
-    setIsRefreshing(false);
-  };
-
-  return (
-    <div className="rounded-lg border border-border bg-background p-4 space-y-3">
-      <div className="flex items-start justify-between">
-        <div>
-          <p className="font-medium text-foreground">{connection.accountName}</p>
-          <p className="text-sm text-muted-foreground">ID: {connection.accountId}</p>
-        </div>
-        <StatusBadge status={connection.status} />
-      </div>
-
-      {/* Permission Summary */}
-      <div className="grid grid-cols-3 gap-2">
-        <PermissionIndicator label="Analyze" allowed={connection.permissions.canAnalyze} />
-        <PermissionIndicator label="Launch" allowed={connection.permissions.canLaunch} />
-        <PermissionIndicator label="Optimize" allowed={connection.permissions.canOptimize} />
-      </div>
-
-      {/* Limited Access Warning */}
-      {connection.status === 'limited_access' && (
-        <div className="flex items-start gap-2 rounded-md border border-warning/20 bg-warning/5 p-2">
-          <AlertTriangle className="h-4 w-4 shrink-0 text-warning mt-0.5" />
-          <p className="text-xs text-muted-foreground">
-            Limited access. Invite an admin to unlock launch and optimization.
-          </p>
-        </div>
-      )}
-
-      {/* Actions */}
-      <div className="flex gap-2">
-        <Button 
-          variant="outline" 
-          size="sm" 
-          className="flex-1"
-          onClick={handleRefresh}
-          disabled={isRefreshing}
-        >
-          <RefreshCw className={cn("mr-2 h-3 w-3", isRefreshing && "animate-spin")} />
-          Refresh
-        </Button>
-        <Button 
-          variant="outline" 
-          size="sm" 
-          className="text-destructive hover:text-destructive"
-          onClick={onDisconnect}
-        >
-          <Trash2 className="h-3 w-3" />
-        </Button>
-      </div>
-    </div>
-  );
-}
-
-function PlatformSection({ platform }: { platform: Platform }) {
-  const [isConnecting, setIsConnecting] = useState(false);
-  const { currentProject, addConnection, removeConnection, updateConnection } = useProjectStore();
-  const { toast } = useToast();
-  
-  const details = platformDetails[platform];
-  const connections = currentProject?.connections.filter(c => c.platform === platform) || [];
-  const accountCount = connections.length;
-
-  const handleConnect = async () => {
-    if (!currentProject) {
-      toast({
-        title: 'No Project Selected',
-        description: 'Please select a project first.',
-        variant: 'destructive',
-      });
-      return;
-    }
-
-    setIsConnecting(true);
-    
-    try {
-      // Simulate OAuth flow - in production this would redirect to platform OAuth
-      // For now, we simulate the token metadata response
-      const mockTokenMetadata = {
-        access_token: `mock-token-${Date.now()}`,
-        refresh_token: `mock-refresh-${Date.now()}`,
-        expires_in: 3600,
-        scope: 'ads_management',
-      };
-
-      const accountNumber = accountCount + 1;
-      const accountId = `${platform.toUpperCase()}-${Math.random().toString(36).substring(7).toUpperCase()}`;
-      const accountName = `${details.name} Account ${accountNumber}`;
-
-      // Call Brain API to interpret permissions from token
-      const permissionResult = await brainClient.interpretPermissions(currentProject.id, {
-        platform,
-        account: {
-          id: accountId,
-          name: accountName,
-          tokenMetadata: mockTokenMetadata,
-        },
-      });
-
-      const newConnection: AdAccountConnection = {
-        id: `${platform}-${Date.now()}`,
-        platform,
-        accountId,
-        accountName,
-        status: permissionResult.status,
-        permissions: permissionResult.permissions,
-        connectedAt: new Date().toISOString(),
-      };
-      
-      addConnection(currentProject.id, newConnection);
-
-      // Write memory event
-      await brainClient.memoryWrite(currentProject.id, {
-        platform,
-        accountId,
-        event: 'launch',
-        details: {
-          action: 'account_connected',
-          accountName,
-          permissions: permissionResult.permissions,
-        },
-      }).catch(err => {
-        console.warn('[Connections] Failed to write memory event:', err);
-      });
-      
-      toast({
-        title: 'Account Connected',
-        description: `Successfully connected ${accountName}.${permissionResult.warnings?.length ? ` Warning: ${permissionResult.warnings[0]}` : ''}`,
-      });
-    } catch (error) {
-      const message = error instanceof BrainClientError 
-        ? error.message 
-        : `Failed to connect ${details.name}. Please try again.`;
-      
-      toast({
-        title: 'Connection Failed',
-        description: message,
-        variant: 'destructive',
-      });
-    } finally {
-      setIsConnecting(false);
-    }
-  };
-
-  const handleRefresh = async (connection: AdAccountConnection) => {
-    if (!currentProject) return;
-
-    try {
-      const permissionResult = await brainClient.interpretPermissions(currentProject.id, {
-        platform,
-        account: {
-          id: connection.accountId,
-          name: connection.accountName,
-          tokenMetadata: { refreshed: true },
-        },
-      });
-
-      updateConnection(currentProject.id, connection.id, {
-        status: permissionResult.status,
-        permissions: permissionResult.permissions,
-      });
-
-      toast({
-        title: 'Permissions Refreshed',
-        description: `Updated permissions for ${connection.accountName}.`,
-      });
-    } catch (error) {
-      const message = error instanceof BrainClientError 
-        ? error.message 
-        : 'Failed to refresh permissions.';
-      
-      toast({
-        title: 'Refresh Failed',
-        description: message,
-        variant: 'destructive',
-      });
-    }
-  };
-
-  const handleDisconnect = (connectionId: string, accountName: string) => {
-    if (!currentProject) return;
-    removeConnection(currentProject.id, connectionId);
-    toast({
-      title: 'Account Disconnected',
-      description: `${accountName} has been disconnected.`,
-    });
-  };
-
-  return (
-    <Card className="border-border bg-card overflow-hidden">
-      <div className={cn('h-2 bg-gradient-to-r', details.gradient)} />
-      <CardHeader>
-        <div className="flex items-start justify-between">
-          <div className="flex items-center gap-3">
-            <span className="text-3xl">{details.icon}</span>
-            <div>
-              <CardTitle className="flex items-center gap-2">
-                {details.name}
-                {accountCount > 0 && (
-                  <span className="rounded-full bg-primary/10 px-2 py-0.5 text-xs font-medium text-primary">
-                    {accountCount} account{accountCount !== 1 ? 's' : ''}
-                  </span>
-                )}
-              </CardTitle>
-              <CardDescription className="mt-1">
-                {accountCount === 0 
-                  ? details.description 
-                  : `${accountCount} account${accountCount !== 1 ? 's' : ''} connected`}
-              </CardDescription>
-            </div>
-          </div>
-        </div>
-      </CardHeader>
-      <CardContent className="space-y-4">
-        {/* Connected Accounts List */}
-        {connections.length > 0 && (
-          <div className="space-y-3">
-            {connections.map(connection => (
-              <AccountItem 
-                key={connection.id} 
-                connection={connection}
-                onDisconnect={() => handleDisconnect(connection.id, connection.accountName)}
-                onRefresh={() => handleRefresh(connection)}
-              />
-            ))}
-          </div>
-        )}
-
-        {/* Add Account Button */}
-        <Button 
-          onClick={handleConnect} 
-          disabled={isConnecting || !currentProject}
-          className="w-full"
-          variant={connections.length > 0 ? 'outline' : (
-            platform === 'google' ? 'google' : 
-            platform === 'tiktok' ? 'tiktok' : 'snapchat'
-          )}
-        >
-          {isConnecting ? (
-            <>
-              <RefreshCw className="mr-2 h-4 w-4 animate-spin" />
-              Connecting...
-            </>
-          ) : (
-            <>
-              {connections.length > 0 ? (
-                <Plus className="mr-2 h-4 w-4" />
-              ) : (
-                <Link2 className="mr-2 h-4 w-4" />
-              )}
-              {connections.length > 0 ? 'Add Another Account' : `Connect ${details.name}`}
-            </>
-          )}
-        </Button>
-      </CardContent>
-    </Card>
-  );
-}
+import { AdAccountConnector } from '@/components/oauth/AdAccountConnector';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 
 export default function Connections() {
-  const { currentProject, ensureProject } = useProjectStore();
+  const { currentProject } = useProjectStore();
 
-  // Auto-ensure project exists
-  const project = currentProject || ensureProject();
-
-  const totalConnections = project?.connections.length || 0;
-  const launchableConnections = project?.connections.filter(c => c.permissions.canLaunch).length || 0;
-  const analyzeConnections = project?.connections.filter(c => c.permissions.canAnalyze).length || 0;
-  const optimizeConnections = project?.connections.filter(c => c.permissions.canOptimize).length || 0;
+  if (!currentProject) {
+    return (
+      <div className="flex h-[50vh] items-center justify-center">
+        <p className="text-muted-foreground">Select a project to manage connections</p>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-8">
@@ -348,51 +23,28 @@ export default function Connections() {
         </p>
       </div>
 
-      {/* Summary Stats */}
-      {totalConnections > 0 && (
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-          <Card className="border-border bg-card">
-            <CardContent className="p-4">
-              <p className="text-sm text-muted-foreground">Total Accounts</p>
-              <p className="text-2xl font-bold text-foreground">{totalConnections}</p>
-            </CardContent>
-          </Card>
-          <Card className="border-success/20 bg-success/5">
-            <CardContent className="p-4">
-              <div className="flex items-center gap-2">
-                <Check className="h-4 w-4 text-success" />
-                <p className="text-sm text-muted-foreground">Can Analyze</p>
-              </div>
-              <p className="text-2xl font-bold text-success">{analyzeConnections}</p>
-            </CardContent>
-          </Card>
-          <Card className="border-primary/20 bg-primary/5">
-            <CardContent className="p-4">
-              <div className="flex items-center gap-2">
-                <Check className="h-4 w-4 text-primary" />
-                <p className="text-sm text-muted-foreground">Can Launch</p>
-              </div>
-              <p className="text-2xl font-bold text-primary">{launchableConnections}</p>
-            </CardContent>
-          </Card>
-          <Card className="border-accent/20 bg-accent/5">
-            <CardContent className="p-4">
-              <div className="flex items-center gap-2">
-                <Check className="h-4 w-4 text-accent-foreground" />
-                <p className="text-sm text-muted-foreground">Can Optimize</p>
-              </div>
-              <p className="text-2xl font-bold text-accent-foreground">{optimizeConnections}</p>
-            </CardContent>
-          </Card>
-        </div>
-      )}
-
-      {/* Connection Cards */}
-      <div className="grid gap-6 lg:grid-cols-3">
-        <PlatformSection platform="google" />
-        <PlatformSection platform="tiktok" />
-        <PlatformSection platform="snapchat" />
+      <div className="grid gap-6">
+        <AdAccountConnector projectId={currentProject.id} />
       </div>
+
+      {/* Info Card */}
+      <Card>
+        <CardHeader>
+          <CardTitle>About Connections</CardTitle>
+          <CardDescription>
+            AdLaunch AI uses the "One App" model. You connect your ad accounts safely via our SaaS apps.
+            Tokens are encrypted at rest and never exposed to the frontend.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <ul className="list-disc list-inside text-sm text-muted-foreground space-y-1">
+            <li>Tokens auto-refresh 5 minutes before expiry</li>
+            <li>Permissions are scoped to strictly necessary management features</li>
+            <li>You can revoke access at any time</li>
+          </ul>
+        </CardContent>
+      </Card>
     </div>
   );
 }
+

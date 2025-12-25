@@ -18,27 +18,29 @@ import Monitoring from "./pages/Monitoring";
 import Recovery from "./pages/Recovery";
 import Settings from "./pages/Settings";
 import NotFound from "./pages/NotFound";
+import OAuthSuccess from "./pages/OAuthSuccess";
+import OAuthError from "./pages/OAuthError";
 
 const queryClient = new QueryClient();
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const { user } = useProjectStore();
-  
+
   if (!user) {
     return <Navigate to="/auth" replace />;
   }
-  
+
   return <>{children}</>;
 }
 
 function AuthRoute({ children }: { children: React.ReactNode }) {
   const { user } = useProjectStore();
-  
+
   if (user) {
     // Redirect to dashboard (new entry point)
     return <Navigate to="/dashboard" replace />;
   }
-  
+
   return <>{children}</>;
 }
 
@@ -59,6 +61,10 @@ const App = () => (
               </AuthRoute>
             }
           />
+
+          {/* OAuth callback routes - outside protected area */}
+          <Route path="/oauth-success" element={<OAuthSuccess />} />
+          <Route path="/oauth-error" element={<OAuthError />} />
 
           {/* Protected dashboard routes - AI-first flow */}
           <Route

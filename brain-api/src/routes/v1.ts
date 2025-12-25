@@ -8,6 +8,7 @@ import { OptimizerEngine } from '../lib/adlaunch-ai/engines/optimizer'
 import { RecoveryEngine } from '../lib/adlaunch-ai/engines/recovery'
 import { MemoryEngine } from '../lib/adlaunch-ai/memory/index'
 import { DevInMemoryAdapter, PostgresAdapter } from '../lib/adlaunch-ai/memory/adapters'
+import oauthRoutes from './oauth'
 
 const app = new Hono()
 
@@ -200,5 +201,8 @@ app.post('/automation/profile/update', zValidator('json', profileUpdateSchema), 
 
     return c.json({ success: true })
 })
+
+// --- OAuth Routes ---
+app.route('/oauth', oauthRoutes)
 
 export default app
