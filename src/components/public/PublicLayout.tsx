@@ -7,9 +7,7 @@ export function PublicLayout() {
             <nav className="fixed top-0 left-0 right-0 z-50 bg-[#0F0F14]/90 backdrop-blur-md border-b border-white/5">
                 <div className="max-w-7xl mx-auto px-6 py-4 flex items-center justify-between">
                     <Link to="/" className="flex items-center gap-2">
-                        <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-violet-500 to-purple-600 flex items-center justify-center">
-                            <span className="text-white font-bold text-sm">A</span>
-                        </div>
+                        <img src="/logo.png" alt="AdLaunch AI" className="w-8 h-8 rounded-lg" />
                         <span className="text-xl font-semibold">AdLaunch AI</span>
                     </Link>
 
@@ -40,9 +38,7 @@ export function PublicLayout() {
                     <div className="grid md:grid-cols-4 gap-8">
                         <div>
                             <div className="flex items-center gap-2 mb-4">
-                                <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-violet-500 to-purple-600 flex items-center justify-center">
-                                    <span className="text-white font-bold text-sm">A</span>
-                                </div>
+                                <img src="/logo.png" alt="AdLaunch AI" className="w-8 h-8 rounded-lg" />
                                 <span className="text-lg font-semibold">AdLaunch AI</span>
                             </div>
                             <p className="text-gray-500 text-sm">
