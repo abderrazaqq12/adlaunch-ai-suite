@@ -1,14 +1,16 @@
 import { useNavigate } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { useProjectStore } from '@/stores/projectStore';
 import {
   Upload,
   Link2,
   Rocket,
   CheckCircle2,
-  Activity,
   Zap,
   ArrowRight,
+  Target,
+  Activity,
 } from 'lucide-react';
 
 export default function Dashboard() {
@@ -26,133 +28,154 @@ export default function Dashboard() {
   const activeRules = rules.filter(r => r.projectId === currentProject?.id && r.enabled).length;
 
   return (
-    <div className="max-w-6xl mx-auto space-y-10">
-      {/* Welcome Section */}
-      <div className="pt-4">
-        <h1 className="text-3xl font-bold text-foreground">Welcome back</h1>
-        <p className="mt-2 text-lg text-muted-foreground">
-          Here's what's happening with your campaigns
+    <div className="space-y-6">
+      {/* Welcome Header */}
+      <div>
+        <h1 className="text-2xl font-bold text-foreground">My Campaigns</h1>
+        <p className="text-muted-foreground">
+          {connectedAccounts} accounts connected • AI-powered optimization active
         </p>
       </div>
 
       {/* Stats Grid */}
       <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-4">
         {/* Connected Accounts */}
-        <div className="p-6 rounded-2xl bg-white/[0.02] border border-white/[0.06]">
-          <div className="flex items-center gap-4">
-            <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-blue-500/10">
-              <Link2 className="h-5 w-5 text-blue-400" />
+        <Card className="border-border bg-card">
+          <CardContent className="p-6">
+            <div className="flex items-center gap-4">
+              <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-blue-500/10">
+                <Link2 className="h-6 w-6 text-blue-400" />
+              </div>
+              <div>
+                <p className="text-3xl font-bold text-foreground">{connectedAccounts}</p>
+                <p className="text-sm text-muted-foreground">Accounts</p>
+              </div>
             </div>
-            <div>
-              <p className="text-3xl font-bold text-foreground">{connectedAccounts}</p>
-              <p className="text-sm text-muted-foreground">Accounts</p>
-            </div>
-          </div>
-        </div>
+          </CardContent>
+        </Card>
 
         {/* Assets */}
-        <div className="p-6 rounded-2xl bg-white/[0.02] border border-white/[0.06]">
-          <div className="flex items-center gap-4">
-            <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-green-500/10">
-              <CheckCircle2 className="h-5 w-5 text-green-400" />
+        <Card className="border-border bg-card">
+          <CardContent className="p-6">
+            <div className="flex items-center gap-4">
+              <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-green-500/10">
+                <CheckCircle2 className="h-6 w-6 text-green-400" />
+              </div>
+              <div>
+                <p className="text-3xl font-bold text-foreground">
+                  {approvedAssets}
+                  <span className="text-lg font-normal text-muted-foreground ml-1">/ {projectAssets.length}</span>
+                </p>
+                <p className="text-sm text-muted-foreground">Assets Ready</p>
+              </div>
             </div>
-            <div>
-              <p className="text-3xl font-bold text-foreground">
-                {approvedAssets}
-                <span className="text-lg font-normal text-muted-foreground ml-1">/ {projectAssets.length}</span>
-              </p>
-              <p className="text-sm text-muted-foreground">Assets Ready</p>
-            </div>
-          </div>
-        </div>
+          </CardContent>
+        </Card>
 
         {/* Active Campaigns */}
-        <div className="p-6 rounded-2xl bg-white/[0.02] border border-white/[0.06]">
-          <div className="flex items-center gap-4">
-            <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-purple-500/10">
-              <Rocket className="h-5 w-5 text-purple-400" />
+        <Card className="border-border bg-card">
+          <CardContent className="p-6">
+            <div className="flex items-center gap-4">
+              <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-purple-500/10">
+                <Rocket className="h-6 w-6 text-purple-400" />
+              </div>
+              <div>
+                <p className="text-3xl font-bold text-foreground">{activeCampaigns}</p>
+                <p className="text-sm text-muted-foreground">Campaigns</p>
+              </div>
             </div>
-            <div>
-              <p className="text-3xl font-bold text-foreground">{activeCampaigns}</p>
-              <p className="text-sm text-muted-foreground">Campaigns</p>
-            </div>
-          </div>
-        </div>
+          </CardContent>
+        </Card>
 
         {/* Active Rules */}
-        <div className="p-6 rounded-2xl bg-white/[0.02] border border-white/[0.06]">
-          <div className="flex items-center gap-4">
-            <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-amber-500/10">
-              <Zap className="h-5 w-5 text-amber-400" />
+        <Card className="border-border bg-card">
+          <CardContent className="p-6">
+            <div className="flex items-center gap-4">
+              <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-amber-500/10">
+                <Zap className="h-6 w-6 text-amber-400" />
+              </div>
+              <div>
+                <p className="text-3xl font-bold text-foreground">{activeRules}</p>
+                <p className="text-sm text-muted-foreground">Active Rules</p>
+              </div>
             </div>
-            <div>
-              <p className="text-3xl font-bold text-foreground">{activeRules}</p>
-              <p className="text-sm text-muted-foreground">Active Rules</p>
-            </div>
-          </div>
-        </div>
+          </CardContent>
+        </Card>
       </div>
 
       {/* Quick Actions */}
-      <div className="space-y-6">
-        <h2 className="text-xl font-semibold text-foreground">Quick Actions</h2>
+      <Card className="border-border bg-card">
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <Target className="h-5 w-5" />
+            Quick Actions
+          </CardTitle>
+          <CardDescription>
+            Start building your ad campaigns
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+            <button
+              onClick={() => navigate('/assets')}
+              className="p-4 rounded-lg border border-border bg-muted/30 hover:bg-muted/50 hover:border-primary/30 transition-all text-left"
+            >
+              <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-primary/10 mb-3">
+                <Upload className="h-5 w-5 text-primary" />
+              </div>
+              <h3 className="font-medium text-foreground">Upload Assets</h3>
+              <p className="text-sm text-muted-foreground mt-1">Add videos and ad copy</p>
+            </button>
 
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-          <button
-            onClick={() => navigate('/assets')}
-            className="group p-6 rounded-2xl bg-white/[0.02] border border-white/[0.06] hover:bg-white/[0.04] hover:border-white/[0.12] transition-all text-left"
-          >
-            <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-primary/10 mb-4">
-              <Upload className="h-5 w-5 text-primary" />
-            </div>
-            <h3 className="font-medium text-foreground mb-1">Upload Assets</h3>
-            <p className="text-sm text-muted-foreground">Add videos and ad copy</p>
-          </button>
+            <button
+              onClick={() => navigate('/connections')}
+              className="p-4 rounded-lg border border-border bg-muted/30 hover:bg-muted/50 hover:border-primary/30 transition-all text-left"
+            >
+              <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-blue-500/10 mb-3">
+                <Link2 className="h-5 w-5 text-blue-400" />
+              </div>
+              <h3 className="font-medium text-foreground">Connect Account</h3>
+              <p className="text-sm text-muted-foreground mt-1">Link ad platforms</p>
+            </button>
 
-          <button
-            onClick={() => navigate('/connections')}
-            className="group p-6 rounded-2xl bg-white/[0.02] border border-white/[0.06] hover:bg-white/[0.04] hover:border-white/[0.12] transition-all text-left"
-          >
-            <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-blue-500/10 mb-4">
-              <Link2 className="h-5 w-5 text-blue-400" />
-            </div>
-            <h3 className="font-medium text-foreground mb-1">Connect Account</h3>
-            <p className="text-sm text-muted-foreground">Link ad platforms</p>
-          </button>
+            <button
+              onClick={() => navigate('/launch')}
+              className="p-4 rounded-lg border border-border bg-muted/30 hover:bg-muted/50 hover:border-primary/30 transition-all text-left"
+            >
+              <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-purple-500/10 mb-3">
+                <Rocket className="h-5 w-5 text-purple-400" />
+              </div>
+              <h3 className="font-medium text-foreground">Launch Campaign</h3>
+              <p className="text-sm text-muted-foreground mt-1">Publish to platforms</p>
+            </button>
 
-          <button
-            onClick={() => navigate('/launch')}
-            className="group p-6 rounded-2xl bg-white/[0.02] border border-white/[0.06] hover:bg-white/[0.04] hover:border-white/[0.12] transition-all text-left"
-          >
-            <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-purple-500/10 mb-4">
-              <Rocket className="h-5 w-5 text-purple-400" />
-            </div>
-            <h3 className="font-medium text-foreground mb-1">Launch Campaign</h3>
-            <p className="text-sm text-muted-foreground">Publish to platforms</p>
-          </button>
-
-          <button
-            onClick={() => navigate('/rules')}
-            className="group p-6 rounded-2xl bg-white/[0.02] border border-white/[0.06] hover:bg-white/[0.04] hover:border-white/[0.12] transition-all text-left"
-          >
-            <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-amber-500/10 mb-4">
-              <Zap className="h-5 w-5 text-amber-400" />
-            </div>
-            <h3 className="font-medium text-foreground mb-1">Add Automation</h3>
-            <p className="text-sm text-muted-foreground">Create AI rules</p>
-          </button>
-        </div>
-      </div>
+            <button
+              onClick={() => navigate('/rules')}
+              className="p-4 rounded-lg border border-border bg-muted/30 hover:bg-muted/50 hover:border-primary/30 transition-all text-left"
+            >
+              <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-amber-500/10 mb-3">
+                <Zap className="h-5 w-5 text-amber-400" />
+              </div>
+              <h3 className="font-medium text-foreground">Add Automation</h3>
+              <p className="text-sm text-muted-foreground mt-1">Create AI rules</p>
+            </button>
+          </div>
+        </CardContent>
+      </Card>
 
       {/* Getting Started */}
       {projectAssets.length === 0 && connectedAccounts === 0 && (
-        <div className="p-8 rounded-2xl bg-gradient-to-br from-primary/5 to-blue-500/5 border border-primary/10">
-          <div className="max-w-2xl">
-            <h2 className="text-xl font-semibold text-foreground mb-2">Get Started</h2>
-            <p className="text-muted-foreground mb-6">
-              Start by uploading your video ads and connecting your ad accounts.
-              Our AI will analyze your content for compliance and help optimize your campaigns.
-            </p>
+        <Card className="border-primary/20 bg-primary/5">
+          <CardContent className="p-6">
+            <div className="flex items-center gap-3 mb-4">
+              <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-primary text-primary-foreground">
+                <Rocket className="h-5 w-5" />
+              </div>
+              <div>
+                <p className="font-medium text-foreground">Get Started</p>
+                <p className="text-sm text-muted-foreground">Upload assets and connect ad accounts</p>
+              </div>
+            </div>
             <div className="flex flex-wrap gap-3">
               <Button onClick={() => navigate('/assets')} className="gap-2">
                 <Upload className="h-4 w-4" />
@@ -163,27 +186,34 @@ export default function Dashboard() {
                 Connect Account
               </Button>
             </div>
-          </div>
-        </div>
+          </CardContent>
+        </Card>
       )}
 
       {/* Activity Section */}
-      <div className="space-y-6">
-        <div className="flex items-center justify-between">
-          <h2 className="text-xl font-semibold text-foreground">Recent Activity</h2>
+      <Card className="border-border bg-card">
+        <CardHeader className="flex flex-row items-center justify-between">
+          <div>
+            <CardTitle className="flex items-center gap-2">
+              <Activity className="h-5 w-5" />
+              Recent Activity
+            </CardTitle>
+            <CardDescription>
+              Real-time updates from your campaigns
+            </CardDescription>
+          </div>
           <Button variant="ghost" size="sm" className="text-muted-foreground" onClick={() => navigate('/monitoring')}>
             View all
             <ArrowRight className="h-4 w-4 ml-1" />
           </Button>
-        </div>
-
-        <div className="p-6 rounded-2xl bg-white/[0.02] border border-white/[0.06]">
-          <div className="flex items-center gap-4 text-muted-foreground">
+        </CardHeader>
+        <CardContent>
+          <div className="flex items-center gap-4 p-4 rounded-lg border border-border bg-muted/30 text-muted-foreground">
             <Activity className="h-5 w-5" />
             <p>No recent activity. Start by uploading assets or connecting an ad account.</p>
           </div>
-        </div>
-      </div>
+        </CardContent>
+      </Card>
     </div>
   );
 }
