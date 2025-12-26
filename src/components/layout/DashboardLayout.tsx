@@ -1,12 +1,73 @@
 import { Outlet } from 'react-router-dom';
 import { Sidebar } from './Sidebar';
+import { Search, Bell, Calendar } from 'lucide-react';
+import { useProjectStore } from '@/stores/projectStore';
 
 export function DashboardLayout() {
+  const { user } = useProjectStore();
+  const today = new Date().toLocaleDateString('en-US', {
+    weekday: 'short',
+    month: 'short',
+    day: 'numeric'
+  });
+
   return (
-    <div className="min-h-screen bg-background">
+    <div className="min-h-screen bg-[#050810]">
+      {/* Background gradient effects */}
+      <div className="fixed inset-0 overflow-hidden pointer-events-none">
+        <div className="absolute -top-40 -right-40 w-96 h-96 bg-primary/10 rounded-full blur-3xl" />
+        <div className="absolute top-1/2 -left-40 w-80 h-80 bg-blue-500/5 rounded-full blur-3xl" />
+        <div className="absolute bottom-0 right-1/4 w-64 h-64 bg-primary/5 rounded-full blur-3xl" />
+      </div>
+
       <Sidebar />
-      <main className="pl-64">
-        <div className="min-h-screen p-8">
+
+      <main className="pl-16 relative">
+        {/* Top Header */}
+        <header className="sticky top-0 z-30 h-16 border-b border-white/5 bg-[#050810]/80 backdrop-blur-xl">
+          <div className="flex h-full items-center justify-between px-6">
+            {/* Left: Search */}
+            <div className="flex items-center gap-4">
+              <div className="relative">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                <input
+                  type="text"
+                  placeholder="Search campaigns, assets..."
+                  className="h-9 w-72 rounded-lg bg-white/5 border border-white/10 pl-10 pr-4 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary/50 focus:border-primary/50 transition-all"
+                />
+                <kbd className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-muted-foreground bg-white/5 px-1.5 py-0.5 rounded">/</kbd>
+              </div>
+            </div>
+
+            {/* Right: Date, Notifications, User */}
+            <div className="flex items-center gap-4">
+              {/* Date */}
+              <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-white/5 border border-white/10">
+                <Calendar className="h-4 w-4 text-primary" />
+                <span className="text-sm text-foreground">{today}</span>
+              </div>
+
+              {/* Notifications */}
+              <button className="relative h-9 w-9 rounded-lg bg-white/5 border border-white/10 flex items-center justify-center hover:bg-white/10 transition-colors">
+                <Bell className="h-4 w-4 text-muted-foreground" />
+                <span className="absolute top-1.5 right-1.5 h-2 w-2 bg-primary rounded-full" />
+              </button>
+
+              {/* User Avatar */}
+              <div className="flex items-center gap-3 pl-4 border-l border-white/10">
+                <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-gradient-to-br from-primary to-blue-600 text-sm font-medium text-white">
+                  {user?.name?.charAt(0) || 'U'}
+                </div>
+                <div className="hidden md:block">
+                  <p className="text-sm font-medium text-foreground">{user?.name || 'User'}</p>
+                </div>
+              </div>
+            </div>
+          </div>
+        </header>
+
+        {/* Page Content */}
+        <div className="min-h-[calc(100vh-4rem)] p-6">
           <Outlet />
         </div>
       </main>

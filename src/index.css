@@ -6,25 +6,25 @@
 
 @layer base {
   :root {
-    --background: 240 10% 5%;
+    --background: 222 47% 4%;
     --foreground: 210 40% 98%;
 
-    --card: 240 10% 7%;
+    --card: 222 47% 6%;
     --card-foreground: 210 40% 98%;
 
-    --popover: 240 10% 9%;
+    --popover: 222 47% 8%;
     --popover-foreground: 210 40% 98%;
 
-    --primary: 263 91% 66%;
+    --primary: 217 91% 60%;
     --primary-foreground: 0 0% 100%;
 
-    --secondary: 240 10% 12%;
+    --secondary: 222 47% 10%;
     --secondary-foreground: 210 40% 98%;
 
-    --muted: 240 10% 14%;
-    --muted-foreground: 215 20% 55%;
+    --muted: 222 47% 12%;
+    --muted-foreground: 215 25% 50%;
 
-    --accent: 263 91% 66%;
+    --accent: 217 91% 60%;
     --accent-foreground: 0 0% 100%;
 
     --destructive: 0 72% 51%;
@@ -36,9 +36,9 @@
     --warning: 45 93% 47%;
     --warning-foreground: 222 47% 6%;
 
-    --border: 240 10% 16%;
-    --input: 240 10% 14%;
-    --ring: 263 91% 66%;
+    --border: 222 47% 12%;
+    --input: 222 47% 10%;
+    --ring: 217 91% 60%;
 
     --radius: 0.75rem;
 
@@ -47,35 +47,40 @@
     --google-red: 4 90% 58%;
     --google-yellow: 45 93% 47%;
     --google-green: 142 71% 45%;
-    
+
     --tiktok: 180 100% 50%;
     --tiktok-pink: 340 82% 59%;
-    
+
     --snapchat: 54 100% 50%;
 
-    /* Gradients - Updated to violet */
-    --gradient-primary: linear-gradient(135deg, hsl(263 91% 66%) 0%, hsl(280 91% 60%) 100%);
+    /* Premium Gradients */
+    --gradient-primary: linear-gradient(135deg, hsl(217 91% 60%) 0%, hsl(263 91% 66%) 100%);
     --gradient-success: linear-gradient(135deg, hsl(142 76% 36%) 0%, hsl(160 84% 39%) 100%);
     --gradient-destructive: linear-gradient(135deg, hsl(0 72% 51%) 0%, hsl(340 82% 52%) 100%);
-    --gradient-tiktok: linear-gradient(135deg, hsl(180 100% 50%) 0%, hsl(340 82% 59%) 100%);
-    --gradient-google: linear-gradient(135deg, hsl(217 89% 61%) 0%, hsl(4 90% 58%) 50%, hsl(45 93% 47%) 100%);
-    --gradient-surface: linear-gradient(180deg, hsl(240 10% 9%) 0%, hsl(240 10% 7%) 100%);
+    --gradient-glass: linear-gradient(135deg, rgba(255, 255, 255, 0.05) 0%, rgba(255, 255, 255, 0.02) 100%);
+    --gradient-surface: linear-gradient(180deg, hsl(222 47% 8%) 0%, hsl(222 47% 5%) 100%);
+    --gradient-hero: radial-gradient(ellipse at 50% 0%, hsl(217 91% 60% / 0.15) 0%, transparent 50%);
 
-    /* Shadows - Updated to violet glow */
-    --shadow-sm: 0 1px 2px 0 hsl(240 10% 4% / 0.5);
-    --shadow-md: 0 4px 6px -1px hsl(240 10% 4% / 0.5), 0 2px 4px -2px hsl(240 10% 4% / 0.5);
-    --shadow-lg: 0 10px 15px -3px hsl(240 10% 4% / 0.5), 0 4px 6px -4px hsl(240 10% 4% / 0.5);
-    --shadow-glow: 0 0 20px hsl(263 91% 66% / 0.3);
+    /* Glassmorphism */
+    --glass-bg: rgba(255, 255, 255, 0.03);
+    --glass-border: rgba(255, 255, 255, 0.08);
+    --glass-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+
+    /* Premium Shadows */
+    --shadow-sm: 0 1px 2px 0 hsl(222 47% 2% / 0.5);
+    --shadow-md: 0 4px 6px -1px hsl(222 47% 2% / 0.5), 0 2px 4px -2px hsl(222 47% 2% / 0.5);
+    --shadow-lg: 0 10px 15px -3px hsl(222 47% 2% / 0.5), 0 4px 6px -4px hsl(222 47% 2% / 0.5);
+    --shadow-glow: 0 0 30px hsl(217 91% 60% / 0.25);
     --shadow-glow-success: 0 0 20px hsl(142 76% 36% / 0.3);
 
-    --sidebar-background: 240 10% 6%;
+    --sidebar-background: 222 47% 5%;
     --sidebar-foreground: 210 40% 90%;
-    --sidebar-primary: 263 91% 66%;
+    --sidebar-primary: 217 91% 60%;
     --sidebar-primary-foreground: 0 0% 100%;
-    --sidebar-accent: 240 10% 12%;
+    --sidebar-accent: 222 47% 10%;
     --sidebar-accent-foreground: 210 40% 98%;
-    --sidebar-border: 240 10% 14%;
-    --sidebar-ring: 263 91% 66%;
+    --sidebar-border: 222 47% 10%;
+    --sidebar-ring: 217 91% 60%;
   }
 }
 
@@ -167,6 +172,7 @@
   from {
     opacity: 0;
   }
+
   to {
     opacity: 1;
   }
@@ -177,6 +183,7 @@
     opacity: 0;
     transform: translateY(20px);
   }
+
   to {
     opacity: 1;
     transform: translateY(0);
@@ -188,6 +195,7 @@
     opacity: 0;
     transform: scale(0.95);
   }
+
   to {
     opacity: 1;
     transform: scale(1);
@@ -195,9 +203,12 @@
 }
 
 @keyframes pulse-glow {
-  0%, 100% {
+
+  0%,
+  100% {
     box-shadow: 0 0 20px hsl(217 91% 60% / 0.3);
   }
+
   50% {
     box-shadow: 0 0 30px hsl(217 91% 60% / 0.5);
   }
