@@ -5,10 +5,10 @@
  * All methods handle errors consistently using the unified error model.
  */
 
-import type { 
-  Platform, 
-  CampaignIntent, 
-  PlatformConfig, 
+import type {
+  Platform,
+  CampaignIntent,
+  PlatformConfig,
   PlatformPermissions,
   ExecutionStatus,
   CampaignMetrics,
@@ -22,7 +22,7 @@ import { supabase } from '@/integrations/supabase/client';
 // ============================================
 
 const BRAIN_API_BASE_URL = import.meta.env.VITE_BRAIN_API_BASE_URL || '';
-const BRAIN_API_TOKEN = import.meta.env.VITE_BRAIN_API_TOKEN || '';
+// SECURITY: No hardcoded tokens - uses Supabase session JWT
 
 // Supabase Edge Function URL for AI analysis
 const SUPABASE_FUNCTIONS_URL = 'https://fzngibjbhrirkdbpxmii.supabase.co/functions/v1';
@@ -70,10 +70,14 @@ async function handleResponse<T>(response: Response): Promise<T> {
   return response.json();
 }
 
-function buildHeaders(projectId: string): HeadersInit {
+async function buildHeaders(projectId: string): Promise<HeadersInit> {
+  // Get Supabase session token for auth
+  const { data: { session } } = await supabase.auth.getSession();
+  const token = session?.access_token || '';
+
   return {
     'Content-Type': 'application/json',
-    'Authorization': `Bearer ${BRAIN_API_TOKEN}`,
+    'Authorization': `Bearer ${token}`,
     'X-Project-Id': projectId,
     'X-Request-Id': generateRequestId(),
   };
@@ -137,7 +141,7 @@ export interface DecideLaunchResponse {
 // ============================================
 
 // Real execution status - reflects actual ad platform execution
-export type RealExecutionStatus = 
+export type RealExecutionStatus =
   | 'EXECUTED'           // Successfully created in ad platform
   | 'EXECUTION_FAILED'   // API call failed
   | 'EXECUTION_BLOCKED'; // Blocked by platform policy
@@ -315,7 +319,7 @@ export const brainClient = {
 
     const response = await fetch(`${BRAIN_API_BASE_URL}/v1/permissions/interpret`, {
       method: 'POST',
-      headers: buildHeaders(projectId),
+      headers: await buildHeaders(projectId),
       body: JSON.stringify(request),
     });
 
@@ -345,7 +349,7 @@ export const brainClient = {
 
     const response = await fetch(`${BRAIN_API_BASE_URL}/v1/translator/campaign`, {
       method: 'POST',
-      headers: buildHeaders(projectId),
+      headers: await buildHeaders(projectId),
       body: JSON.stringify(request),
     });
 
@@ -362,22 +366,22 @@ export const brainClient = {
   ): Promise<DecideLaunchResponse> {
     if (!BRAIN_API_BASE_URL) {
       console.warn('[BrainClient] No API URL configured, using fallback');
-      const canProceed = request.policyRiskScore < 70 && 
-                         request.executionStatus !== 'BLOCKED' &&
-                         request.permissions.canLaunch;
+      const canProceed = request.policyRiskScore < 70 &&
+        request.executionStatus !== 'BLOCKED' &&
+        request.permissions.canLaunch;
       return {
         decision: canProceed ? 'proceed' : 'block',
-        reason: canProceed 
-          ? 'All checks passed' 
+        reason: canProceed
+          ? 'All checks passed'
           : 'Risk score too high or permissions insufficient',
-        riskLevel: request.policyRiskScore < 30 ? 'low' : 
-                   request.policyRiskScore < 70 ? 'medium' : 'high',
+        riskLevel: request.policyRiskScore < 30 ? 'low' :
+          request.policyRiskScore < 70 ? 'medium' : 'high',
       };
     }
 
     const response = await fetch(`${BRAIN_API_BASE_URL}/v1/decider/launch`, {
       method: 'POST',
-      headers: buildHeaders(projectId),
+      headers: await buildHeaders(projectId),
       body: JSON.stringify(request),
     });
 
@@ -399,7 +403,7 @@ export const brainClient = {
   ): Promise<LaunchRunResponse> {
     if (!BRAIN_API_BASE_URL) {
       console.warn('[BrainClient] No API URL configured, using fallback');
-      
+
       // Build fallback response based on execution readiness
       const platformResults: LaunchPlatformResult[] = request.executionReadiness.platformStatuses.map(ps => {
         const launchedAccounts: LaunchAccountResult[] = ps.readyAccounts.map(accountId => ({
@@ -409,7 +413,7 @@ export const brainClient = {
           campaignId: `campaign-${Date.now()}-${ps.platform}-${accountId}`,
           platformCampaignId: `plat-${Date.now()}`,
         }));
-        
+
         const skippedAccounts: LaunchAccountResult[] = ps.blockedAccounts.map(blocked => ({
           accountId: blocked.id,
           accountName: blocked.name,
@@ -434,7 +438,7 @@ export const brainClient = {
         platformResults,
         totalCampaignsLaunched: totalLaunched,
         totalCampaignsSkipped: totalSkipped,
-        memoryEventIds: platformResults.flatMap(pr => 
+        memoryEventIds: platformResults.flatMap(pr =>
           pr.accounts.filter(a => a.status !== 'BLOCKED' && a.status !== 'SKIPPED').map(() => `evt-${Date.now()}`)
         ),
       };
@@ -442,7 +446,7 @@ export const brainClient = {
 
     const response = await fetch(`${BRAIN_API_BASE_URL}/v1/launch/run`, {
       method: 'POST',
-      headers: buildHeaders(projectId),
+      headers: await buildHeaders(projectId),
       body: JSON.stringify(request),
     });
 
@@ -466,7 +470,7 @@ export const brainClient = {
 
     const response = await fetch(`${BRAIN_API_BASE_URL}/v1/optimizer/analyze`, {
       method: 'POST',
-      headers: buildHeaders(projectId),
+      headers: await buildHeaders(projectId),
       body: JSON.stringify(request),
     });
 
@@ -498,7 +502,7 @@ export const brainClient = {
 
     const response = await fetch(`${BRAIN_API_BASE_URL}/v1/recovery/generate`, {
       method: 'POST',
-      headers: buildHeaders(projectId),
+      headers: await buildHeaders(projectId),
       body: JSON.stringify(request),
     });
 
@@ -522,7 +526,7 @@ export const brainClient = {
 
     const response = await fetch(`${BRAIN_API_BASE_URL}/v1/memory/write`, {
       method: 'POST',
-      headers: buildHeaders(projectId),
+      headers: await buildHeaders(projectId),
       body: JSON.stringify(request),
     });
 
@@ -538,7 +542,7 @@ export const brainClient = {
     request: AnalyzeAssetRequest
   ): Promise<AnalyzeAssetResponse> {
     console.log('[BrainClient] Analyzing asset via Supabase Edge Function:', request.asset.id);
-    
+
     try {
       const response = await fetch(`${SUPABASE_FUNCTIONS_URL}/analyze-asset`, {
         method: 'POST',
@@ -562,11 +566,11 @@ export const brainClient = {
       return result;
     } catch (error) {
       console.error('[BrainClient] analyzeAsset error:', error);
-      
+
       if (error instanceof BrainClientError) {
         throw error;
       }
-      
+
       throw new BrainClientError({
         error: 'AI_ANALYSIS_ERROR',
         message: error instanceof Error ? error.message : 'AI analysis failed',
@@ -582,7 +586,7 @@ export const brainClient = {
     request: AnalyzeBatchRequest
   ): Promise<AnalyzeBatchResponse> {
     console.log('[BrainClient] Analyzing batch via Supabase Edge Function:', request.assets.length, 'assets');
-    
+
     try {
       const response = await fetch(`${SUPABASE_FUNCTIONS_URL}/analyze-asset`, {
         method: 'POST',
@@ -606,11 +610,11 @@ export const brainClient = {
       return result;
     } catch (error) {
       console.error('[BrainClient] analyzeAssetBatch error:', error);
-      
+
       if (error instanceof BrainClientError) {
         throw error;
       }
-      
+
       throw new BrainClientError({
         error: 'AI_ANALYSIS_ERROR',
         message: error instanceof Error ? error.message : 'Batch AI analysis failed',

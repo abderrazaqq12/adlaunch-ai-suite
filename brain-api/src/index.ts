@@ -14,6 +14,28 @@ app.use('*', logger())
 // Request timeout (30 seconds)
 app.use('*', timeout(30000))
 
+// Simple rate limiting (100 requests per minute per IP)
+const rateLimitMap = new Map<string, { count: number; resetAt: number }>()
+const RATE_LIMIT = 100
+const RATE_WINDOW = 60000 // 1 minute
+
+app.use('/api/*', async (c, next) => {
+    const ip = c.req.header('x-forwarded-for') || c.req.header('cf-connecting-ip') || 'unknown'
+    const now = Date.now()
+    const record = rateLimitMap.get(ip)
+
+    if (!record || now > record.resetAt) {
+        rateLimitMap.set(ip, { count: 1, resetAt: now + RATE_WINDOW })
+    } else if (record.count >= RATE_LIMIT) {
+        c.header('Retry-After', String(Math.ceil((record.resetAt - now) / 1000)))
+        return c.json({ error: 'Too many requests' }, 429)
+    } else {
+        record.count++
+    }
+
+    await next()
+})
+
 // Health check endpoints (NO auth required)
 app.get('/health', (c) => {
     return c.json({
