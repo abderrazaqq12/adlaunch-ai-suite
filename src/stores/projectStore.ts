@@ -1,11 +1,11 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
-import type { 
-  Project, 
-  AdAccountConnection, 
-  Asset, 
-  Campaign, 
-  AutomationRule, 
+import type {
+  Project,
+  AdAccountConnection,
+  Asset,
+  Campaign,
+  AutomationRule,
   User,
   ProjectStage,
   AssetStatus,
@@ -17,6 +17,7 @@ import type {
 
 interface ProjectState {
   user: User | null;
+  isApproved: boolean;
   projects: Project[];
   currentProject: Project | null;
   assets: Asset[];
@@ -24,40 +25,41 @@ interface ProjectState {
   rules: AutomationRule[];
   ruleExecutionLogs: RuleExecutionLog[];
   campaignIntents: CampaignIntent[];
-  
+
   // Auth actions
   setUser: (user: User | null) => void;
-  
+  setIsApproved: (approved: boolean) => void;
+
   // Project actions (internal)
   setCurrentProject: (project: Project | null) => void;
   addProject: (project: Project) => void;
   updateProject: (id: string, updates: Partial<Project>) => void;
   updateProjectStage: (projectId: string, stage: ProjectStage) => void;
-  
+
   // Auto-project: ensures a project exists, creates one silently if needed
   ensureProject: () => Project;
-  
+
   // Connection actions
   addConnection: (projectId: string, connection: AdAccountConnection) => void;
   updateConnection: (projectId: string, connectionId: string, updates: Partial<AdAccountConnection>) => void;
   removeConnection: (projectId: string, connectionId: string) => void;
   getAccountsForPlatform: (projectId: string, platform: Platform) => AdAccountConnection[];
-  
+
   // Asset actions
   addAsset: (asset: Asset) => void;
   removeAsset: (id: string) => void;
   updateAsset: (id: string, updates: Partial<Asset>) => void;
   updateAssetStatus: (id: string, status: AssetStatus, analysisResult?: AssetAnalysisResult) => void;
-  
+
   // Campaign Intent actions
   addCampaignIntent: (intent: CampaignIntent) => void;
   updateCampaignIntent: (id: string, updates: Partial<CampaignIntent>) => void;
   removeCampaignIntent: (id: string) => void;
-  
+
   // Campaign actions
   addCampaign: (campaign: Campaign) => void;
   updateCampaign: (id: string, updates: Partial<Campaign>) => void;
-  
+
   // Rule actions
   addRule: (rule: AutomationRule) => void;
   updateRule: (id: string, updates: Partial<AutomationRule>) => void;
@@ -104,6 +106,7 @@ export const useProjectStore = create<ProjectState>()(
   persist(
     (set, get) => ({
       user: null,
+      isApproved: false,
       projects: [],
       currentProject: null,
       assets: [],
@@ -111,20 +114,21 @@ export const useProjectStore = create<ProjectState>()(
       rules: [],
       ruleExecutionLogs: [],
       campaignIntents: [],
-      
+
       setUser: (user) => set({ user }),
-      
+      setIsApproved: (approved) => set({ isApproved: approved }),
+
       setCurrentProject: (project) => set({ currentProject: project }),
-      
+
       addProject: (project) => set((state) => ({
         projects: [...state.projects, { ...project, stage: 'SETUP' }],
         currentProject: { ...project, stage: 'SETUP' },
       })),
-      
+
       updateProject: (id, updates) => set((state) => ({
         projects: state.projects.map((p) => p.id === id ? { ...p, ...updates } : p),
-        currentProject: state.currentProject?.id === id 
-          ? { ...state.currentProject, ...updates } 
+        currentProject: state.currentProject?.id === id
+          ? { ...state.currentProject, ...updates }
           : state.currentProject,
       })),
 
@@ -138,34 +142,34 @@ export const useProjectStore = create<ProjectState>()(
       // Auto-project creation: silently creates a project if none exists
       ensureProject: () => {
         const state = get();
-        
+
         // If we already have a current project, return it
         if (state.currentProject) {
           return state.currentProject;
         }
-        
+
         // If we have any projects, set the first one as current
         if (state.projects.length > 0) {
           const project = state.projects[0];
           set({ currentProject: project });
           return project;
         }
-        
+
         // Create a new default project silently
         const newProject = createDefaultProject();
-        
+
         set({
           projects: [newProject],
           currentProject: newProject,
         });
-        
+
         return newProject;
       },
-      
+
       addConnection: (projectId, connection) => {
         set((state) => ({
-          projects: state.projects.map((p) => 
-            p.id === projectId 
+          projects: state.projects.map((p) =>
+            p.id === projectId
               ? { ...p, connections: [...p.connections, connection] }
               : p
           ),
@@ -175,25 +179,25 @@ export const useProjectStore = create<ProjectState>()(
         }));
         get().recalculateProjectStage(projectId);
       },
-      
+
       updateConnection: (projectId, connectionId, updates) => set((state) => ({
         projects: state.projects.map((p) =>
           p.id === projectId
             ? {
-                ...p,
-                connections: p.connections.map((c) =>
-                  c.id === connectionId ? { ...c, ...updates } : c
-                ),
-              }
+              ...p,
+              connections: p.connections.map((c) =>
+                c.id === connectionId ? { ...c, ...updates } : c
+              ),
+            }
             : p
         ),
         currentProject: state.currentProject?.id === projectId
           ? {
-              ...state.currentProject,
-              connections: state.currentProject.connections.map((c) =>
-                c.id === connectionId ? { ...c, ...updates } : c
-              ),
-            }
+            ...state.currentProject,
+            connections: state.currentProject.connections.map((c) =>
+              c.id === connectionId ? { ...c, ...updates } : c
+            ),
+          }
           : state.currentProject,
       })),
 
@@ -219,20 +223,20 @@ export const useProjectStore = create<ProjectState>()(
           c => c.platform === platform && (c.status === 'connected' || c.status === 'limited_access')
         );
       },
-      
+
       addAsset: (asset) => {
         const state = get();
         // Auto-create project if needed
         const project = state.ensureProject();
-        const assetWithStatus: Asset = { 
-          ...asset, 
+        const assetWithStatus: Asset = {
+          ...asset,
           status: 'UPLOADED',
           projectId: asset.projectId || project.id,
         };
         set((state) => ({ assets: [...state.assets, assetWithStatus] }));
         get().recalculateProjectStage(assetWithStatus.projectId);
       },
-      
+
       removeAsset: (id) => {
         const state = get();
         const asset = state.assets.find(a => a.id === id);
@@ -243,16 +247,16 @@ export const useProjectStore = create<ProjectState>()(
           get().recalculateProjectStage(asset.projectId);
         }
       },
-      
+
       updateAsset: (id, updates) => set((state) => ({
         assets: state.assets.map((a) => a.id === id ? { ...a, ...updates } : a),
       })),
 
       updateAssetStatus: (id, status, analysisResult) => {
         set((state) => ({
-          assets: state.assets.map((a) => 
-            a.id === id 
-              ? { ...a, status, analysisResult: analysisResult || a.analysisResult } 
+          assets: state.assets.map((a) =>
+            a.id === id
+              ? { ...a, status, analysisResult: analysisResult || a.analysisResult }
               : a
           ),
         }));
@@ -274,7 +278,7 @@ export const useProjectStore = create<ProjectState>()(
       removeCampaignIntent: (id) => set((state) => ({
         campaignIntents: state.campaignIntents.filter(i => i.id !== id),
       })),
-      
+
       addCampaign: (campaign) => {
         const state = get();
         // Auto-create project if needed
@@ -288,17 +292,17 @@ export const useProjectStore = create<ProjectState>()(
         }));
         get().updateProjectStage(campaignWithProject.projectId, 'LIVE');
       },
-      
+
       updateCampaign: (id, updates) => set((state) => ({
         campaigns: state.campaigns.map((c) => c.id === id ? { ...c, ...updates } : c),
       })),
-      
+
       addRule: (rule) => set((state) => ({ rules: [...state.rules, rule] })),
-      
+
       updateRule: (id, updates) => set((state) => ({
         rules: state.rules.map((r) => r.id === id ? { ...r, ...updates } : r),
       })),
-      
+
       removeRule: (id) => set((state) => ({
         rules: state.rules.filter((r) => r.id !== id),
       })),
@@ -326,12 +330,12 @@ export const useProjectStore = create<ProjectState>()(
       getStageBlockReason: (projectId, requiredStage) => {
         const state = get();
         const project = state.projects.find(p => p.id === projectId);
-        
+
         if (!project) return null; // No blocking - will auto-create
-        
+
         const currentStageIndex = getStageIndex(project.stage);
         const requiredStageIndex = getStageIndex(requiredStage);
-        
+
         if (currentStageIndex >= requiredStageIndex) return null;
 
         switch (requiredStage) {

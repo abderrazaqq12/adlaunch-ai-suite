@@ -20,6 +20,7 @@ import Settings from "./pages/Settings";
 import NotFound from "./pages/NotFound";
 import OAuthSuccess from "./pages/OAuthSuccess";
 import OAuthError from "./pages/OAuthError";
+import PendingApproval from "./pages/PendingApproval";
 
 // Public Pages
 import { PublicLayout } from "./components/public/PublicLayout";
@@ -42,11 +43,30 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
 }
 
 function AuthRoute({ children }: { children: React.ReactNode }) {
-  const { user } = useProjectStore();
+  const { user, isApproved } = useProjectStore();
 
   if (user) {
+    // Check if user is approved
+    if (!isApproved) {
+      return <Navigate to="/pending-approval" replace />;
+    }
     // Redirect to dashboard (new entry point)
     return <Navigate to="/dashboard" replace />;
+  }
+
+  return <>{children}</>;
+}
+
+// Wrapper that checks if user is approved before allowing access
+function ApprovedRoute({ children }: { children: React.ReactNode }) {
+  const { user, isApproved } = useProjectStore();
+
+  if (!user) {
+    return <Navigate to="/auth" replace />;
+  }
+
+  if (!isApproved) {
+    return <Navigate to="/pending-approval" replace />;
   }
 
   return <>{children}</>;
@@ -78,16 +98,19 @@ const App = () => (
             }
           />
 
+          {/* Pending approval page */}
+          <Route path="/pending-approval" element={<PendingApproval />} />
+
           {/* OAuth callback routes - outside protected area */}
           <Route path="/oauth-success" element={<OAuthSuccess />} />
           <Route path="/oauth-error" element={<OAuthError />} />
 
-          {/* Protected dashboard routes - AI-first flow */}
+          {/* Protected dashboard routes - requires approval */}
           <Route
             element={
-              <ProtectedRoute>
+              <ApprovedRoute>
                 <DashboardLayout />
-              </ProtectedRoute>
+              </ApprovedRoute>
             }
           >
             <Route path="/dashboard" element={<Dashboard />} />

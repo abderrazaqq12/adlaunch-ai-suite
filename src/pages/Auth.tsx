@@ -19,7 +19,7 @@ export default function Auth() {
   const [signupPassword, setSignupPassword] = useState('');
 
   const navigate = useNavigate();
-  const { setUser, ensureProject } = useProjectStore();
+  const { setUser, setIsApproved, ensureProject } = useProjectStore();
   const { toast } = useToast();
 
   const handleLogin = async (e: React.FormEvent) => {
@@ -54,6 +54,10 @@ export default function Auth() {
         name: profile?.full_name || data.user.email!.split('@')[0],
       });
 
+      // Check approval status
+      const isApproved = profile?.approved === true;
+      setIsApproved(isApproved);
+
       // Auto-create project silently
       ensureProject();
 
@@ -62,7 +66,12 @@ export default function Auth() {
         description: 'You have successfully logged in.',
       });
 
-      navigate('/assets');
+      // Navigate based on approval status
+      if (isApproved) {
+        navigate('/dashboard');
+      } else {
+        navigate('/pending-approval');
+      }
     } catch (error: any) {
       console.error('Login error:', error);
       toast({
@@ -119,15 +128,19 @@ export default function Auth() {
         name: signupName,
       });
 
+      // New users are NOT approved by default
+      setIsApproved(false);
+
       // Auto-create project silently
       ensureProject();
 
       toast({
         title: 'Account created!',
-        description: 'Welcome to AdLaunch AI.',
+        description: 'Your account is pending approval.',
       });
 
-      navigate('/assets');
+      // New users go to pending approval
+      navigate('/pending-approval');
     } catch (error: any) {
       console.error('Signup error:', error);
       toast({
