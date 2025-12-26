@@ -28,7 +28,7 @@ export default function Dashboard() {
   const activeRules = rules.filter(r => r.projectId === currentProject?.id && r.enabled).length;
 
   return (
-    <div className="space-y-6">
+    <div className="mx-auto max-w-3xl space-y-6">
       {/* Welcome Header */}
       <div>
         <h1 className="text-2xl font-bold text-foreground">My Campaigns</h1>
