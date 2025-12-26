@@ -50,9 +50,7 @@ export function Sidebar() {
       <div className="flex h-full flex-col">
         {/* Logo */}
         <div className="flex h-16 items-center gap-2 border-b border-sidebar-border px-6">
-          <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary">
-            <Rocket className="h-4 w-4 text-primary-foreground" />
-          </div>
+          <img src="/logo.png" alt="AdLaunch AI" className="h-8 w-8 rounded-lg" />
           <span className="text-lg font-semibold text-sidebar-foreground">AdLaunch AI</span>
         </div>
 
@@ -61,7 +59,7 @@ export function Sidebar() {
           {navItems.map((item) => {
             const isActive = location.pathname === item.path;
             const Icon = item.icon;
-            
+
             return (
               <Link
                 key={item.path}
@@ -86,7 +84,7 @@ export function Sidebar() {
           {bottomNavItems.map((item) => {
             const isActive = location.pathname === item.path;
             const Icon = item.icon;
-            
+
             return (
               <Link
                 key={item.path}

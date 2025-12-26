@@ -6,26 +6,26 @@
 
 @layer base {
   :root {
-    --background: 222 47% 6%;
+    --background: 240 10% 5%;
     --foreground: 210 40% 98%;
 
-    --card: 222 47% 8%;
+    --card: 240 10% 7%;
     --card-foreground: 210 40% 98%;
 
-    --popover: 222 47% 10%;
+    --popover: 240 10% 9%;
     --popover-foreground: 210 40% 98%;
 
-    --primary: 217 91% 60%;
-    --primary-foreground: 222 47% 6%;
+    --primary: 263 91% 66%;
+    --primary-foreground: 0 0% 100%;
 
-    --secondary: 222 47% 12%;
+    --secondary: 240 10% 12%;
     --secondary-foreground: 210 40% 98%;
 
-    --muted: 222 47% 14%;
+    --muted: 240 10% 14%;
     --muted-foreground: 215 20% 55%;
 
-    --accent: 222 47% 16%;
-    --accent-foreground: 210 40% 98%;
+    --accent: 263 91% 66%;
+    --accent-foreground: 0 0% 100%;
 
     --destructive: 0 72% 51%;
     --destructive-foreground: 210 40% 98%;
@@ -36,9 +36,9 @@
     --warning: 45 93% 47%;
     --warning-foreground: 222 47% 6%;
 
-    --border: 222 47% 16%;
-    --input: 222 47% 14%;
-    --ring: 217 91% 60%;
+    --border: 240 10% 16%;
+    --input: 240 10% 14%;
+    --ring: 263 91% 66%;
 
     --radius: 0.75rem;
 
@@ -53,29 +53,29 @@
     
     --snapchat: 54 100% 50%;
 
-    /* Gradients */
-    --gradient-primary: linear-gradient(135deg, hsl(217 91% 60%) 0%, hsl(252 91% 65%) 100%);
+    /* Gradients - Updated to violet */
+    --gradient-primary: linear-gradient(135deg, hsl(263 91% 66%) 0%, hsl(280 91% 60%) 100%);
     --gradient-success: linear-gradient(135deg, hsl(142 76% 36%) 0%, hsl(160 84% 39%) 100%);
     --gradient-destructive: linear-gradient(135deg, hsl(0 72% 51%) 0%, hsl(340 82% 52%) 100%);
     --gradient-tiktok: linear-gradient(135deg, hsl(180 100% 50%) 0%, hsl(340 82% 59%) 100%);
     --gradient-google: linear-gradient(135deg, hsl(217 89% 61%) 0%, hsl(4 90% 58%) 50%, hsl(45 93% 47%) 100%);
-    --gradient-surface: linear-gradient(180deg, hsl(222 47% 10%) 0%, hsl(222 47% 8%) 100%);
+    --gradient-surface: linear-gradient(180deg, hsl(240 10% 9%) 0%, hsl(240 10% 7%) 100%);
 
-    /* Shadows */
-    --shadow-sm: 0 1px 2px 0 hsl(222 47% 4% / 0.5);
-    --shadow-md: 0 4px 6px -1px hsl(222 47% 4% / 0.5), 0 2px 4px -2px hsl(222 47% 4% / 0.5);
-    --shadow-lg: 0 10px 15px -3px hsl(222 47% 4% / 0.5), 0 4px 6px -4px hsl(222 47% 4% / 0.5);
-    --shadow-glow: 0 0 20px hsl(217 91% 60% / 0.3);
+    /* Shadows - Updated to violet glow */
+    --shadow-sm: 0 1px 2px 0 hsl(240 10% 4% / 0.5);
+    --shadow-md: 0 4px 6px -1px hsl(240 10% 4% / 0.5), 0 2px 4px -2px hsl(240 10% 4% / 0.5);
+    --shadow-lg: 0 10px 15px -3px hsl(240 10% 4% / 0.5), 0 4px 6px -4px hsl(240 10% 4% / 0.5);
+    --shadow-glow: 0 0 20px hsl(263 91% 66% / 0.3);
     --shadow-glow-success: 0 0 20px hsl(142 76% 36% / 0.3);
 
-    --sidebar-background: 222 47% 7%;
+    --sidebar-background: 240 10% 6%;
     --sidebar-foreground: 210 40% 90%;
-    --sidebar-primary: 217 91% 60%;
-    --sidebar-primary-foreground: 222 47% 6%;
-    --sidebar-accent: 222 47% 12%;
+    --sidebar-primary: 263 91% 66%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 240 10% 12%;
     --sidebar-accent-foreground: 210 40% 98%;
-    --sidebar-border: 222 47% 14%;
-    --sidebar-ring: 217 91% 60%;
+    --sidebar-border: 240 10% 14%;
+    --sidebar-ring: 263 91% 66%;
   }
 }
 
