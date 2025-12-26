@@ -21,6 +21,14 @@ import NotFound from "./pages/NotFound";
 import OAuthSuccess from "./pages/OAuthSuccess";
 import OAuthError from "./pages/OAuthError";
 
+// Public Pages
+import { PublicLayout } from "./components/public/PublicLayout";
+import Landing from "./pages/public/Landing";
+import About from "./pages/public/About";
+import Privacy from "./pages/public/Privacy";
+import Terms from "./pages/public/Terms";
+import Contact from "./pages/public/Contact";
+
 const queryClient = new QueryClient();
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
@@ -51,8 +59,16 @@ const App = () => (
       <Sonner />
       <BrowserRouter>
         <Routes>
-          {/* Public routes */}
-          <Route path="/" element={<Navigate to="/auth" replace />} />
+          {/* Public marketing pages */}
+          <Route element={<PublicLayout />}>
+            <Route path="/" element={<Landing />} />
+            <Route path="/about" element={<About />} />
+            <Route path="/privacy" element={<Privacy />} />
+            <Route path="/terms" element={<Terms />} />
+            <Route path="/contact" element={<Contact />} />
+          </Route>
+
+          {/* Auth route */}
           <Route
             path="/auth"
             element={
