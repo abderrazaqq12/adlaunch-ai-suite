@@ -1,10 +1,14 @@
+import { useState } from 'react';
 import { Outlet } from 'react-router-dom';
 import { Sidebar } from './Sidebar';
 import { Search, Bell, Calendar } from 'lucide-react';
 import { useProjectStore } from '@/stores/projectStore';
+import { cn } from '@/lib/utils';
 
 export function DashboardLayout() {
   const { user } = useProjectStore();
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+
   const today = new Date().toLocaleDateString('en-US', {
     weekday: 'short',
     month: 'short',
@@ -20,9 +24,12 @@ export function DashboardLayout() {
         <div className="absolute bottom-0 right-1/4 w-64 h-64 bg-primary/5 rounded-full blur-3xl" />
       </div>
 
-      <Sidebar />
+      <Sidebar isCollapsed={sidebarCollapsed} onToggle={() => setSidebarCollapsed(!sidebarCollapsed)} />
 
-      <main className="pl-16 relative">
+      <main className={cn(
+        "relative transition-all duration-300",
+        sidebarCollapsed ? "pl-16" : "pl-56"
+      )}>
         {/* Top Header */}
         <header className="sticky top-0 z-30 h-16 border-b border-white/5 bg-[#050810]/80 backdrop-blur-xl">
           <div className="flex h-full items-center justify-between px-6">

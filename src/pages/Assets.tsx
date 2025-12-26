@@ -16,12 +16,12 @@ import { getAssetStateConfig } from '@/lib/state-machines/types';
 import type { ComplianceIssue } from '@/lib/api';
 import { sanitizeAdCopy, safeDisplayText, TEXT_LIMITS } from '@/lib/validation/textSanitization';
 import { validateFiles, ALLOWED_VIDEO_MIME_TYPES, MAX_FILE_SIZE_MB } from '@/lib/validation/fileValidation';
-import { 
-  Upload, 
-  Video, 
-  FileText, 
-  Plus, 
-  Trash2, 
+import {
+  Upload,
+  Video,
+  FileText,
+  Plus,
+  Trash2,
   Sparkles,
   RefreshCw,
   CheckCircle2,
@@ -60,12 +60,12 @@ function AssetsContent() {
   const [complianceIssues, setComplianceIssues] = useState<ComplianceIssue[]>([]);
   const [isAnalyzingAll, setIsAnalyzingAll] = useState(false);
   const [analysisProgress, setAnalysisProgress] = useState(0);
-  
+
   const { assets, addAsset, removeAsset, updateAsset, currentProject } = useProjectStore();
   const { toast } = useToast();
-  
-  const { 
-    uploadFile, 
+
+  const {
+    uploadFile,
     deleteFile,
     isUploading,
     revokeObjectUrl,
@@ -83,13 +83,13 @@ function AssetsContent() {
   // State machine: Transition based on analysis result
   const transitionFromAnalysis = (assetId: string, passed: boolean, result: any) => {
     if (passed) {
-      updateAsset(assetId, { 
+      updateAsset(assetId, {
         status: 'APPROVED',
         analysisResult: result,
         rejectionReasons: [],
       });
     } else {
-      updateAsset(assetId, { 
+      updateAsset(assetId, {
         status: 'BLOCKED',
         analysisResult: result,
         rejectionReasons: result.issues?.map((i: any) => i.message) || [],
@@ -103,7 +103,7 @@ function AssetsContent() {
 
     // Validate files first
     const { validFiles, errors } = validateFiles(Array.from(files), ALLOWED_VIDEO_MIME_TYPES);
-    
+
     // Report validation errors
     errors.forEach(({ file, error }) => {
       toast({
@@ -122,7 +122,7 @@ function AssetsContent() {
 
     for (const file of validFiles) {
       const result = await uploadFile(file, type);
-      
+
       if (result.success && result.url) {
         const newAsset: Asset = {
           id: `asset-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
@@ -157,7 +157,7 @@ function AssetsContent() {
 
   const handleTextChange = useCallback((value: string) => {
     setTextContent(value);
-    
+
     // Validate on change
     if (value.length > TEXT_LIMITS.AD_COPY) {
       setTextError(`Ad copy must be ${TEXT_LIMITS.AD_COPY} characters or less (${value.length} entered)`);
@@ -171,7 +171,7 @@ function AssetsContent() {
 
     // Sanitize and validate
     const { value, isValid, error } = sanitizeAdCopy(textContent);
-    
+
     if (!isValid) {
       toast({
         title: 'Invalid Ad Copy',
@@ -206,18 +206,18 @@ function AssetsContent() {
     if (asset.storagePath) {
       await deleteFile(asset.storagePath);
     }
-    
+
     // Revoke any object URLs (for backwards compatibility)
     if (asset.url?.startsWith('blob:')) {
       revokeObjectUrl(asset.url);
     }
-    
+
     removeAsset(asset.id);
   };
 
   const handleRunAnalysis = async (assetId: string) => {
     if (!currentProject) return;
-    
+
     const asset = assets.find(a => a.id === assetId);
     if (!asset) return;
 
@@ -241,16 +241,16 @@ function AssetsContent() {
         creativeQualityScore: result.creativeQualityScore,
         passed: result.approved,
         analyzedAt: result.analyzedAt,
-        issues: result.issues.map(i => ({ 
-          severity: i.severity, 
-          message: i.message, 
-          platform: 'google' as const 
+        issues: result.issues.map(i => ({
+          severity: i.severity,
+          message: i.message,
+          platform: 'google' as const
         })),
       });
 
       toast({
         title: result.approved ? 'Asset Approved' : 'Asset Blocked',
-        description: result.approved 
+        description: result.approved
           ? `${asset.name} passed AI compliance.`
           : `${asset.name} failed. ${result.rejectionReasons.length} issue(s) found.`,
         variant: result.approved ? 'default' : 'destructive',
@@ -258,7 +258,7 @@ function AssetsContent() {
     } catch (error) {
       // Revert to previous state on error
       updateAsset(assetId, { status: 'UPLOADED' });
-      
+
       toast({
         title: 'Analysis Failed',
         description: error instanceof BrainClientError ? error.message : 'Please try again.',
@@ -269,7 +269,7 @@ function AssetsContent() {
 
   const handleAnalyzeAll = async () => {
     if (!currentProject) return;
-    
+
     const unanalyzedAssets = projectAssets.filter(a => a.status === 'UPLOADED');
     if (unanalyzedAssets.length === 0) {
       toast({
@@ -303,10 +303,10 @@ function AssetsContent() {
           creativeQualityScore: analysisResult.creativeQualityScore,
           passed: analysisResult.approved,
           analyzedAt: analysisResult.analyzedAt,
-          issues: analysisResult.issues.map(issue => ({ 
-            severity: issue.severity, 
-            message: issue.message, 
-            platform: 'google' as const 
+          issues: analysisResult.issues.map(issue => ({
+            severity: issue.severity,
+            message: issue.message,
+            platform: 'google' as const
           })),
         });
         setAnalysisProgress(((i + 1) / result.results.length) * 100);
@@ -319,7 +319,7 @@ function AssetsContent() {
     } catch (error) {
       // Revert all to UPLOADED on error
       unanalyzedAssets.forEach(a => updateAsset(a.id, { status: 'UPLOADED' }));
-      
+
       toast({
         title: 'Batch Analysis Failed',
         description: error instanceof BrainClientError ? error.message : 'Please try again.',
@@ -382,8 +382,8 @@ function AssetsContent() {
         {asset.type === 'video' && (
           <div className="aspect-video bg-muted">
             {asset.url && (
-              <video 
-                src={asset.url} 
+              <video
+                src={asset.url}
                 className="h-full w-full object-cover"
                 controls
               />
@@ -397,7 +397,7 @@ function AssetsContent() {
                 <p className="truncate font-medium text-foreground">{safeDisplayText(asset.name)}</p>
                 <AssetStatusBadge status={asset.status} size="sm" />
               </div>
-              
+
               {/* Analysis Scores - only show if analyzed */}
               {asset.analysisResult && (
                 <div className="flex gap-3 mb-3 text-xs">
@@ -406,7 +406,7 @@ function AssetsContent() {
                     <span className={cn(
                       "font-medium",
                       asset.analysisResult.policyRiskScore < 30 ? "text-success" :
-                      asset.analysisResult.policyRiskScore < 60 ? "text-warning" : "text-destructive"
+                        asset.analysisResult.policyRiskScore < 60 ? "text-warning" : "text-destructive"
                     )}>
                       Risk: {asset.analysisResult.policyRiskScore}%
                     </span>
@@ -416,14 +416,14 @@ function AssetsContent() {
                     <span className={cn(
                       "font-medium",
                       asset.analysisResult.creativeQualityScore > 70 ? "text-success" :
-                      asset.analysisResult.creativeQualityScore > 50 ? "text-warning" : "text-destructive"
+                        asset.analysisResult.creativeQualityScore > 50 ? "text-warning" : "text-destructive"
                     )}>
                       Quality: {asset.analysisResult.creativeQualityScore}%
                     </span>
                   </div>
                 </div>
               )}
-              
+
               {/* State-Driven Actions */}
               <div className="flex flex-wrap gap-2 mt-3">
                 {/* UPLOADED: Show Run Analysis */}
@@ -488,7 +488,7 @@ function AssetsContent() {
                     </Button>
                   </>
                 )}
-                
+
                 {/* BLOCKED: Show issues + Re-analyze */}
                 {asset.status === 'BLOCKED' && (
                   <>
@@ -547,8 +547,8 @@ function AssetsContent() {
           </p>
         </div>
         {pendingCount > 0 && (
-          <Button 
-            onClick={handleAnalyzeAll} 
+          <Button
+            onClick={handleAnalyzeAll}
             className="gap-2"
             disabled={isAnalyzingAll || analyzingCount > 0}
           >
@@ -651,36 +651,76 @@ function AssetsContent() {
             <CardHeader>
               <CardTitle>Upload Video Ads</CardTitle>
               <CardDescription>
-                Upload videos. AI will analyze for platform compliance.
+                Upload videos from your computer or Google Drive. AI will analyze for platform compliance.
               </CardDescription>
             </CardHeader>
-            <CardContent>
-              <div className="relative">
-                <input
-                  type="file"
-                  accept="video/mp4,video/webm,video/quicktime,video/x-msvideo"
-                  multiple
-                  onChange={(e) => handleFileUpload(e, 'video')}
-                  className="absolute inset-0 cursor-pointer opacity-0"
-                  disabled={isUploading}
-                />
-                <div className={cn(
-                  "flex flex-col items-center justify-center rounded-lg border-2 border-dashed border-border bg-muted/30 p-12 transition-colors hover:border-primary/50 hover:bg-muted/50",
-                  isUploading && "opacity-50 pointer-events-none"
-                )}>
-                  {isUploading ? (
-                    <Loader2 className="h-10 w-10 text-muted-foreground animate-spin" />
-                  ) : (
-                    <Upload className="h-10 w-10 text-muted-foreground" />
-                  )}
-                  <p className="mt-4 font-medium text-foreground">
-                    {isUploading ? 'Uploading...' : 'Drop video files here or click to upload'}
-                  </p>
-                  <p className="mt-1 text-sm text-muted-foreground">
-                    MP4, MOV, or WebM up to {MAX_FILE_SIZE_MB}MB each
-                  </p>
+            <CardContent className="space-y-4">
+              {/* Upload Options */}
+              <div className="grid gap-4 sm:grid-cols-2">
+                {/* Local Upload */}
+                <div className="relative">
+                  <input
+                    type="file"
+                    accept="video/mp4,video/webm,video/quicktime,video/x-msvideo"
+                    multiple
+                    onChange={(e) => handleFileUpload(e, 'video')}
+                    className="absolute inset-0 cursor-pointer opacity-0 z-10"
+                    disabled={isUploading}
+                  />
+                  <div className={cn(
+                    "flex flex-col items-center justify-center rounded-lg border-2 border-dashed border-border bg-muted/30 p-8 transition-colors hover:border-primary/50 hover:bg-muted/50",
+                    isUploading && "opacity-50 pointer-events-none"
+                  )}>
+                    {isUploading ? (
+                      <Loader2 className="h-8 w-8 text-muted-foreground animate-spin" />
+                    ) : (
+                      <Upload className="h-8 w-8 text-muted-foreground" />
+                    )}
+                    <p className="mt-3 font-medium text-foreground text-center">
+                      {isUploading ? 'Uploading...' : 'From Computer'}
+                    </p>
+                    <p className="mt-1 text-xs text-muted-foreground text-center">
+                      Drop files or click to browse
+                    </p>
+                  </div>
                 </div>
+
+                {/* Google Drive Upload */}
+                <button
+                  onClick={() => {
+                    // Open Google Drive picker
+                    // For now, show a coming soon toast
+                    toast({
+                      title: 'Google Drive Integration',
+                      description: 'Connect your Google account in Settings to enable Drive uploads.',
+                    });
+                  }}
+                  className={cn(
+                    "flex flex-col items-center justify-center rounded-lg border-2 border-dashed border-border bg-muted/30 p-8 transition-colors hover:border-[#4285F4]/50 hover:bg-[#4285F4]/5",
+                    isUploading && "opacity-50 pointer-events-none"
+                  )}
+                  disabled={isUploading}
+                >
+                  <svg className="h-8 w-8" viewBox="0 0 87.3 78" xmlns="http://www.w3.org/2000/svg">
+                    <path d="m6.6 66.85 3.85 6.65c.8 1.4 1.95 2.5 3.3 3.3l13.75-23.8h-27.5c0 1.55.4 3.1 1.2 4.5z" fill="#0066da" />
+                    <path d="m43.65 25-13.75-23.8c-1.35.8-2.5 1.9-3.3 3.3l-25.4 44a9.06 9.06 0 0 0 -1.2 4.5h27.5z" fill="#00ac47" />
+                    <path d="m73.55 76.8c1.35-.8 2.5-1.9 3.3-3.3l1.6-2.75 7.65-13.25c.8-1.4 1.2-2.95 1.2-4.5h-27.502l5.852 11.5z" fill="#ea4335" />
+                    <path d="m43.65 25 13.75-23.8c-1.35-.8-2.9-1.2-4.5-1.2h-18.5c-1.6 0-3.15.45-4.5 1.2z" fill="#00832d" />
+                    <path d="m59.8 53h-32.3l-13.75 23.8c1.35.8 2.9 1.2 4.5 1.2h50.8c1.6 0 3.15-.45 4.5-1.2z" fill="#2684fc" />
+                    <path d="m73.4 26.5-12.7-22c-.8-1.4-1.95-2.5-3.3-3.3l-13.75 23.8 16.15 28h27.45c0-1.55-.4-3.1-1.2-4.5z" fill="#ffba00" />
+                  </svg>
+                  <p className="mt-3 font-medium text-foreground text-center">
+                    From Google Drive
+                  </p>
+                  <p className="mt-1 text-xs text-muted-foreground text-center">
+                    Select videos from Drive
+                  </p>
+                </button>
               </div>
+
+              <p className="text-xs text-muted-foreground text-center">
+                Supported formats: MP4, MOV, WebM • Max size: {MAX_FILE_SIZE_MB}MB per file
+              </p>
             </CardContent>
           </Card>
 
@@ -727,8 +767,8 @@ function AssetsContent() {
                 </div>
               </div>
 
-              <Button 
-                onClick={handleAddText} 
+              <Button
+                onClick={handleAddText}
                 disabled={!textContent || !!textError}
               >
                 <Plus className="mr-2 h-4 w-4" />
@@ -741,7 +781,7 @@ function AssetsContent() {
             <div className="space-y-4">
               {textAssets.map(asset => {
                 const stateConfig = getAssetStateConfig(asset.status);
-                
+
                 return (
                   <Card key={asset.id} className={cn(
                     "border-border bg-card",
@@ -763,7 +803,7 @@ function AssetsContent() {
                         <p className="text-foreground whitespace-pre-wrap">
                           {safeDisplayText(asset.content || '')}
                         </p>
-                        
+
                         {/* State-Driven Actions */}
                         <div className="flex flex-wrap gap-2 mt-3">
                           {stateConfig.canRunAnalysis && (
@@ -824,7 +864,7 @@ function AssetsContent() {
                               </Button>
                             </>
                           )}
-                          
+
                           {asset.status === 'BLOCKED' && (
                             <>
                               <Button
@@ -880,12 +920,12 @@ function AssetsContent() {
               AI Decision
             </DialogTitle>
             <DialogDescription>
-              {selectedAsset?.status === 'BLOCKED' 
+              {selectedAsset?.status === 'BLOCKED'
                 ? 'Issues detected by AI compliance engine:'
                 : 'Asset passed AI compliance check'}
             </DialogDescription>
           </DialogHeader>
-          
+
           {selectedAsset && (
             <div className="rounded-lg border border-border bg-muted/30 p-3 mb-4">
               <p className="font-medium text-sm text-foreground">{safeDisplayText(selectedAsset.name)}</p>
@@ -897,12 +937,12 @@ function AssetsContent() {
               )}
             </div>
           )}
-          
+
           {complianceIssues.length > 0 ? (
             <div className="space-y-3 max-h-[300px] overflow-y-auto">
               {complianceIssues.map((issue, index) => (
-                <div 
-                  key={index} 
+                <div
+                  key={index}
                   className="flex items-start gap-3 rounded-lg border border-destructive/20 bg-destructive/5 p-3"
                 >
                   <XCircle className="h-4 w-4 text-destructive shrink-0 mt-0.5" />
@@ -921,13 +961,13 @@ function AssetsContent() {
               <p className="text-sm text-success">No compliance issues detected</p>
             </div>
           )}
-          
+
           <div className="flex justify-end gap-2 mt-4">
             <Button variant="outline" onClick={() => setShowDecisionDialog(false)}>
               Close
             </Button>
             {selectedAsset?.status === 'BLOCKED' && (
-              <Button 
+              <Button
                 onClick={() => {
                   if (selectedAsset) {
                     handleRunAnalysis(selectedAsset.id);
