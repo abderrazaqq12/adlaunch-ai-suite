@@ -1,3 +1,5 @@
-FROM pierrezemb/gostatic
-COPY . /srv/http/
-CMD ["-port","8080","-https-promote", "-enable-logging"]
+# Serve pre-built static files
+FROM nginx:alpine
+COPY dist /usr/share/nginx/html
+EXPOSE 80
+CMD ["nginx", "-g", "daemon off;"]

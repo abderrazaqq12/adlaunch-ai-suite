@@ -1,0 +1,40 @@
+services:
+  frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: adlaunch-frontend
+    restart: unless-stopped
+    networks:
+      - adlaunch-network
+
+  backend:
+    build:
+      context: ./brain-api
+      dockerfile: Dockerfile
+    container_name: adlaunch-backend
+    restart: unless-stopped
+    env_file:
+      - ./brain-api/.env
+    networks:
+      - adlaunch-network
+
+  nginx:
+    image: nginx:alpine
+    container_name: adlaunch-nginx
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - /etc/letsencrypt:/etc/letsencrypt:ro
+    depends_on:
+      - frontend
+      - backend
+    networks:
+      - adlaunch-network
+
+networks:
+  adlaunch-network:
+    driver: bridge
