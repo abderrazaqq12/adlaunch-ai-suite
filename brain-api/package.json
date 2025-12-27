@@ -13,11 +13,11 @@
         "@supabase/supabase-js": "^2.89.0",
         "hono": "^4.0.0",
         "openai": "^6.15.0",
-        "zod": "^3.22.4"
+        "zod": "^3.22.4",
+        "tsx": "^4.7.1"
     },
     "devDependencies": {
         "@types/node": "^20.11.17",
-        "tsx": "^4.7.1",
         "typescript": "^5.0.0"
     }
 }

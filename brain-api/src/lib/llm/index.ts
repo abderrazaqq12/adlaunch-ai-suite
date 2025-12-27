@@ -3,7 +3,6 @@ import fs from 'fs'
 import path from 'path'
 import crypto from 'crypto'
 import { z } from 'zod'
-import fetch from 'node-fetch'
 
 const ANALYSIS_TIMEOUT_MS = 15000 // 15 seconds strict timeout
 const SYSTEM_PROMPT_PATH = path.join(process.cwd(), 'video_analysis_system_prompt.md')
