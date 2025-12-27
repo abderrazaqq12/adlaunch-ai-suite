@@ -1,19 +1,23 @@
 import { useState } from 'react';
 import { Outlet } from 'react-router-dom';
 import { Sidebar } from './Sidebar';
-import { Search, Bell, Calendar } from 'lucide-react';
+import { Search, Bell, Calendar as CalendarIcon } from 'lucide-react';
 import { useProjectStore } from '@/stores/projectStore';
 import { cn } from '@/lib/utils';
+import { format } from "date-fns";
+import { Calendar } from "@/components/ui/calendar";
+import { Button } from "@/components/ui/button";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
 
 export function DashboardLayout() {
   const { user } = useProjectStore();
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
-
-  const today = new Date().toLocaleDateString('en-US', {
-    weekday: 'short',
-    month: 'short',
-    day: 'numeric'
-  });
+  const [date, setDate] = useState<Date | undefined>(new Date());
+  const [isCalendarOpen, setIsCalendarOpen] = useState(false);
 
   return (
     <div className="min-h-screen bg-[#050810]">
@@ -49,10 +53,20 @@ export function DashboardLayout() {
             {/* Right: Date, Notifications, User */}
             <div className="flex items-center gap-4">
               {/* Date */}
-              <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-white/5 border border-white/10">
-                <Calendar className="h-4 w-4 text-primary" />
-                <span className="text-sm text-foreground">{today}</span>
-              </div>
+              <Popover open={isCalendarOpen} onOpenChange={setIsCalendarOpen}>
+                <PopoverTrigger asChild>
+                  <button className="bg-red-500 text-white p-2 rounded">
+                    DEBUG DATE
+                  </button>
+                </PopoverTrigger>
+                <PopoverContent className="w-auto p-4 bg-white text-black" align="end">
+                  <div>
+                    Popover Content Here
+                    <br />
+                    Date: {date?.toISOString()}
+                  </div>
+                </PopoverContent>
+              </Popover>
 
               {/* Notifications */}
               <button className="relative h-9 w-9 rounded-lg bg-white/5 border border-white/10 flex items-center justify-center hover:bg-white/10 transition-colors">
