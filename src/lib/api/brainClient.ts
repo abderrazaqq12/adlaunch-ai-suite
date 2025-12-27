@@ -544,11 +544,10 @@ export const brainClient = {
     console.log('[BrainClient] Analyzing asset via Supabase Edge Function:', request.asset.id);
 
     try {
+      const headers = await buildHeaders(projectId);
       const response = await fetch(`${SUPABASE_FUNCTIONS_URL}/analyze-asset`, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
+        headers,
         body: JSON.stringify({ asset: request.asset }),
       });
 
@@ -588,11 +587,10 @@ export const brainClient = {
     console.log('[BrainClient] Analyzing batch via Supabase Edge Function:', request.assets.length, 'assets');
 
     try {
+      const headers = await buildHeaders(projectId);
       const response = await fetch(`${SUPABASE_FUNCTIONS_URL}/analyze-asset`, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
+        headers,
         body: JSON.stringify({ assets: request.assets }),
       });
 
