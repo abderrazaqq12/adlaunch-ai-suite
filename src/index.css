@@ -6,41 +6,50 @@
 
 @layer base {
   :root {
-    --background: 222 47% 4%;
+    /* Premium Dark SaaS Theme - Deep Space Blue/Black Base */
+    --background: 224 71% 4%;
+    /* #030612 - Very deep blue-black */
     --foreground: 210 40% 98%;
 
-    --card: 222 47% 6%;
+    --card: 224 71% 4%;
+    /* Matching background for seamless look, used with glass utils */
     --card-foreground: 210 40% 98%;
 
-    --popover: 222 47% 8%;
+    --popover: 224 71% 5%;
     --popover-foreground: 210 40% 98%;
 
+    /* Vivid Primary Blue - Optimized for dark mode glow */
     --primary: 217 91% 60%;
+    /* #3B82F6 */
     --primary-foreground: 0 0% 100%;
 
-    --secondary: 222 47% 10%;
+    --secondary: 224 71% 8%;
+    /* Slightly lighter than bg */
     --secondary-foreground: 210 40% 98%;
 
-    --muted: 222 47% 12%;
-    --muted-foreground: 215 25% 50%;
+    --muted: 224 71% 12%;
+    --muted-foreground: 215 20% 65%;
 
     --accent: 217 91% 60%;
     --accent-foreground: 0 0% 100%;
 
-    --destructive: 0 72% 51%;
+    --destructive: 0 84% 60%;
     --destructive-foreground: 210 40% 98%;
 
-    --success: 142 76% 36%;
+    --success: 142 71% 45%;
     --success-foreground: 210 40% 98%;
 
-    --warning: 45 93% 47%;
+    --warning: 35 92% 51%;
     --warning-foreground: 222 47% 6%;
 
-    --border: 222 47% 12%;
-    --input: 222 47% 10%;
+    /* Borders are subtle and glass-like */
+    --border: 217 91% 60% / 0.1;
+    /* Very subtle blue tint */
+    --input: 224 71% 10%;
     --ring: 217 91% 60%;
 
-    --radius: 0.75rem;
+    --radius: 0.5rem;
+    /* Stricter radius for premium feel */
 
     /* Platform Colors */
     --google: 217 89% 61%;
@@ -54,33 +63,24 @@
     --snapchat: 54 100% 50%;
 
     /* Premium Gradients */
-    --gradient-primary: linear-gradient(135deg, hsl(217 91% 60%) 0%, hsl(263 91% 66%) 100%);
+    --gradient-primary: linear-gradient(135deg, hsl(217 91% 60%) 0%, hsl(224 76% 48%) 100%);
     --gradient-success: linear-gradient(135deg, hsl(142 76% 36%) 0%, hsl(160 84% 39%) 100%);
-    --gradient-destructive: linear-gradient(135deg, hsl(0 72% 51%) 0%, hsl(340 82% 52%) 100%);
-    --gradient-glass: linear-gradient(135deg, rgba(255, 255, 255, 0.05) 0%, rgba(255, 255, 255, 0.02) 100%);
-    --gradient-surface: linear-gradient(180deg, hsl(222 47% 8%) 0%, hsl(222 47% 5%) 100%);
-    --gradient-hero: radial-gradient(ellipse at 50% 0%, hsl(217 91% 60% / 0.15) 0%, transparent 50%);
+    --gradient-surface: linear-gradient(180deg, rgba(255, 255, 255, 0.03) 0%, rgba(255, 255, 255, 0.01) 100%);
+    --gradient-glass: linear-gradient(180deg, rgba(255, 255, 255, 0.05) 0%, rgba(255, 255, 255, 0.0) 100%);
 
-    /* Glassmorphism */
-    --glass-bg: rgba(255, 255, 255, 0.03);
-    --glass-border: rgba(255, 255, 255, 0.08);
-    --glass-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
-
-    /* Premium Shadows */
-    --shadow-sm: 0 1px 2px 0 hsl(222 47% 2% / 0.5);
-    --shadow-md: 0 4px 6px -1px hsl(222 47% 2% / 0.5), 0 2px 4px -2px hsl(222 47% 2% / 0.5);
-    --shadow-lg: 0 10px 15px -3px hsl(222 47% 2% / 0.5), 0 4px 6px -4px hsl(222 47% 2% / 0.5);
-    --shadow-glow: 0 0 30px hsl(217 91% 60% / 0.25);
-    --shadow-glow-success: 0 0 20px hsl(142 76% 36% / 0.3);
-
-    --sidebar-background: 222 47% 5%;
+    /* Sidebar Specifics */
+    --sidebar-background: 224 71% 3%;
+    /* Even darker for sidebar */
     --sidebar-foreground: 210 40% 90%;
     --sidebar-primary: 217 91% 60%;
     --sidebar-primary-foreground: 0 0% 100%;
-    --sidebar-accent: 222 47% 10%;
+    --sidebar-accent: 217 91% 60% / 0.1;
     --sidebar-accent-foreground: 210 40% 98%;
-    --sidebar-border: 222 47% 10%;
+    --sidebar-border: 217 91% 60% / 0.05;
     --sidebar-ring: 217 91% 60%;
+
+    /* Shadows */
+    --shadow-glow: 0 0 20px hsl(217 91% 60% / 0.15);
   }
 }
 
@@ -90,81 +90,60 @@
   }
 
   body {
-    @apply bg-background text-foreground font-sans antialiased;
-    font-family: 'Inter', system-ui, sans-serif;
+    @apply bg-background text-foreground font-sans antialiased selection:bg-primary/20 selection:text-primary;
+    background-image:
+      radial-gradient(circle at 50% 0%, hsl(217 91% 60% / 0.08) 0%, transparent 40%),
+      radial-gradient(circle at 100% 0%, hsl(263 91% 66% / 0.05) 0%, transparent 30%);
+    background-attachment: fixed;
   }
 
   /* Custom scrollbar */
   ::-webkit-scrollbar {
-    width: 8px;
-    height: 8px;
+    width: 6px;
+    height: 6px;
   }
 
   ::-webkit-scrollbar-track {
-    @apply bg-background;
+    @apply bg-transparent;
   }
 
   ::-webkit-scrollbar-thumb {
-    @apply bg-muted rounded-full;
-  }
-
-  ::-webkit-scrollbar-thumb:hover {
-    @apply bg-muted-foreground/30;
+    @apply bg-white/10 rounded-full hover:bg-white/20 transition-colors;
   }
 }
 
 @layer components {
+
+  /* Glassmorphism Utilities */
+  .glass-panel {
+    @apply bg-white/[0.03] backdrop-blur-xl border border-white/[0.05] shadow-lg;
+  }
+
   .glass-card {
-    @apply bg-card/50 backdrop-blur-xl border border-border/50 shadow-lg;
+    @apply bg-card/60 backdrop-blur-md border border-white/[0.05] hover:border-white/[0.1] transition-all duration-300;
   }
 
-  .platform-badge-google {
-    background: var(--gradient-google);
-    @apply text-white;
+  /* Premium Inputs */
+  .input-premium {
+    @apply bg-white/[0.03] border-white/[0.08] focus:border-primary/50 focus:ring-primary/20 transition-all;
   }
 
-  .platform-badge-tiktok {
-    background: var(--gradient-tiktok);
-    @apply text-white;
-  }
-
-  .platform-badge-snapchat {
-    @apply bg-snapchat text-black;
+  /* Badges & Status */
+  .badge-glow {
+    @apply shadow-[0_0_10px_rgba(59, 130, 246, 0.3)] border-primary/20;
   }
 
   .stat-card {
-    @apply relative overflow-hidden bg-card border border-border rounded-xl p-6;
-    background: var(--gradient-surface);
+    @apply relative overflow-hidden rounded-xl border border-white/[0.05] bg-card/40 p-6 backdrop-blur-sm transition-all hover:bg-card/60 hover:border-white/[0.1];
   }
 
-  .stat-card::before {
-    content: '';
-    @apply absolute inset-0 opacity-0 transition-opacity duration-300;
-    background: var(--gradient-primary);
-  }
-
-  .stat-card:hover::before {
-    @apply opacity-5;
-  }
-
-  .glow-primary {
-    box-shadow: var(--shadow-glow);
-  }
-
-  .glow-success {
-    box-shadow: var(--shadow-glow-success);
-  }
-
+  /* Animations */
   .animate-fade-in {
-    animation: fadeIn 0.5s ease-out forwards;
+    animation: fadeIn 0.4s ease-out forwards;
   }
 
   .animate-slide-up {
-    animation: slideUp 0.5s ease-out forwards;
-  }
-
-  .animate-scale-in {
-    animation: scaleIn 0.3s ease-out forwards;
+    animation: slideUp 0.4s ease-out forwards;
   }
 }
 
@@ -181,39 +160,11 @@
 @keyframes slideUp {
   from {
     opacity: 0;
-    transform: translateY(20px);
+    transform: translateY(10px);
   }
 
   to {
     opacity: 1;
     transform: translateY(0);
   }
-}
-
-@keyframes scaleIn {
-  from {
-    opacity: 0;
-    transform: scale(0.95);
-  }
-
-  to {
-    opacity: 1;
-    transform: scale(1);
-  }
-}
-
-@keyframes pulse-glow {
-
-  0%,
-  100% {
-    box-shadow: 0 0 20px hsl(217 91% 60% / 0.3);
-  }
-
-  50% {
-    box-shadow: 0 0 30px hsl(217 91% 60% / 0.5);
-  }
-}
-
-.animate-pulse-glow {
-  animation: pulse-glow 2s ease-in-out infinite;
 }

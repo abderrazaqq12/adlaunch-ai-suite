@@ -339,31 +339,32 @@ function SettingsContent() {
       </div>
 
       {/* Status Overview */}
+      {/* Status Overview */}
       <div className="grid gap-4 sm:grid-cols-3">
         {/* AI Compliance Card */}
         <Card className={cn(
-          "border-2 transition-colors",
-          connectionState.aiCompliance.status === 'success' ? "border-success/50 bg-success/5" :
-            connectionState.aiCompliance.status === 'error' ? "border-destructive/50 bg-destructive/5" :
-              "border-primary/50 bg-primary/5"
+          "glass-card transition-all duration-300",
+          connectionState.aiCompliance.status === 'success' ? "border-success/30 bg-success/5 shadow-[0_0_15px_rgba(34,197,94,0.1)]" :
+            connectionState.aiCompliance.status === 'error' ? "border-destructive/30 bg-destructive/5" :
+              "hover:border-primary/30"
         )}>
-          <CardContent className="p-4 flex items-center gap-3">
+          <CardContent className="p-4 flex items-center gap-4">
             <div className={cn(
-              "flex h-10 w-10 items-center justify-center rounded-lg",
-              connectionState.aiCompliance.status === 'success' ? "bg-success/10" :
-                connectionState.aiCompliance.status === 'error' ? "bg-destructive/10" :
-                  "bg-primary/10"
+              "flex h-12 w-12 items-center justify-center rounded-xl transition-colors",
+              connectionState.aiCompliance.status === 'success' ? "bg-success/20 text-success" :
+                connectionState.aiCompliance.status === 'error' ? "bg-destructive/20 text-destructive" :
+                  "bg-primary/10 text-primary"
             )}>
               {connectionState.aiCompliance.status === 'success' ? (
-                <CheckCircle2 className="h-5 w-5 text-success" />
+                <CheckCircle2 className="h-6 w-6" />
               ) : connectionState.aiCompliance.status === 'error' ? (
-                <AlertCircle className="h-5 w-5 text-destructive" />
+                <AlertCircle className="h-6 w-6" />
               ) : (
-                <Sparkles className="h-5 w-5 text-primary" />
+                <Sparkles className="h-6 w-6" />
               )}
             </div>
             <div>
-              <p className="font-medium text-foreground">AI Compliance</p>
+              <p className="font-semibold text-foreground">AI Compliance</p>
               <p className="text-sm text-muted-foreground">
                 {connectionState.aiCompliance.status === 'success' ? 'Connected' :
                   connectionState.aiCompliance.status === 'error' ? 'Failed' :
@@ -375,30 +376,31 @@ function SettingsContent() {
 
         {/* Brain API Card */}
         <Card className={cn(
-          "border-2 transition-colors",
-          connectionState.brain.status === 'success' ? "border-success/50 bg-success/5" :
-            connectionState.brain.status === 'error' ? "border-destructive/50 bg-destructive/5" :
-              isConfigured ? "border-primary/50 bg-primary/5" : "border-warning/50 bg-warning/5"
+          "glass-card transition-all duration-300",
+          connectionState.brain.status === 'success' ? "border-success/30 bg-success/5 shadow-[0_0_15px_rgba(34,197,94,0.1)]" :
+            connectionState.brain.status === 'error' ? "border-destructive/30 bg-destructive/5" :
+              isConfigured ? "border-primary/30 bg-primary/5 shadow-[0_0_15px_rgba(59,130,246,0.1)]" :
+                "border-warning/30 bg-warning/5"
         )}>
-          <CardContent className="p-4 flex items-center gap-3">
+          <CardContent className="p-4 flex items-center gap-4">
             <div className={cn(
-              "flex h-10 w-10 items-center justify-center rounded-lg",
-              connectionState.brain.status === 'success' ? "bg-success/10" :
-                connectionState.brain.status === 'error' ? "bg-destructive/10" :
-                  isConfigured ? "bg-primary/10" : "bg-warning/10"
+              "flex h-12 w-12 items-center justify-center rounded-xl transition-colors",
+              connectionState.brain.status === 'success' ? "bg-success/20 text-success" :
+                connectionState.brain.status === 'error' ? "bg-destructive/20 text-destructive" :
+                  isConfigured ? "bg-primary/20 text-primary" : "bg-warning/20 text-warning"
             )}>
               {connectionState.brain.status === 'success' ? (
-                <CheckCircle2 className="h-5 w-5 text-success" />
+                <CheckCircle2 className="h-6 w-6" />
               ) : connectionState.brain.status === 'error' ? (
-                <AlertCircle className="h-5 w-5 text-destructive" />
+                <AlertCircle className="h-6 w-6" />
               ) : isConfigured ? (
-                <CheckCircle2 className="h-5 w-5 text-primary" />
+                <CheckCircle2 className="h-6 w-6" />
               ) : (
-                <AlertCircle className="h-5 w-5 text-warning" />
+                <AlertCircle className="h-6 w-6" />
               )}
             </div>
             <div>
-              <p className="font-medium text-foreground">Brain API</p>
+              <p className="font-semibold text-foreground">Brain API</p>
               <p className="text-sm text-muted-foreground">
                 {connectionState.brain.status === 'success' ? 'Verified' :
                   connectionState.brain.status === 'error' ? 'Failed' :
@@ -410,34 +412,35 @@ function SettingsContent() {
 
         {/* LLM Provider Card */}
         <Card className={cn(
-          "border-2 transition-colors",
-          connectionState.llm.status === 'success' ? "border-success/50 bg-success/5" :
-            connectionState.llm.status === 'error' ? "border-destructive/50 bg-destructive/5" :
-              isLlmConfigured ? "border-primary/50 bg-primary/5" : "border-warning/50 bg-warning/5"
+          "glass-card transition-all duration-300",
+          connectionState.llm.status === 'success' ? "border-success/30 bg-success/5 shadow-[0_0_15px_rgba(34,197,94,0.1)]" :
+            connectionState.llm.status === 'error' ? "border-destructive/30 bg-destructive/5" :
+              isLlmConfigured ? "border-primary/30 bg-primary/5 shadow-[0_0_15px_rgba(59,130,246,0.1)]" :
+                "border-warning/30 bg-warning/5"
         )}>
-          <CardContent className="p-4 flex items-center gap-3">
+          <CardContent className="p-4 flex items-center gap-4">
             <div className={cn(
-              "flex h-10 w-10 items-center justify-center rounded-lg",
-              connectionState.llm.status === 'success' ? "bg-success/10" :
-                connectionState.llm.status === 'error' ? "bg-destructive/10" :
-                  isLlmConfigured ? "bg-primary/10" : "bg-warning/10"
+              "flex h-12 w-12 items-center justify-center rounded-xl transition-colors",
+              connectionState.llm.status === 'success' ? "bg-success/20 text-success" :
+                connectionState.llm.status === 'error' ? "bg-destructive/20 text-destructive" :
+                  isLlmConfigured ? "bg-primary/20 text-primary" : "bg-warning/20 text-warning"
             )}>
               {connectionState.llm.status === 'success' ? (
-                <CheckCircle2 className="h-5 w-5 text-success" />
+                <CheckCircle2 className="h-6 w-6" />
               ) : connectionState.llm.status === 'error' ? (
-                <AlertCircle className="h-5 w-5 text-destructive" />
+                <AlertCircle className="h-6 w-6" />
               ) : isLlmConfigured ? (
-                <CheckCircle2 className="h-5 w-5 text-primary" />
+                <CheckCircle2 className="h-6 w-6" />
               ) : (
-                <AlertCircle className="h-5 w-5 text-warning" />
+                <AlertCircle className="h-6 w-6" />
               )}
             </div>
             <div>
-              <p className="font-medium text-foreground">LLM Provider</p>
+              <p className="font-semibold text-foreground">LLM Provider</p>
               <p className="text-sm text-muted-foreground">
-                {connectionState.llm.status === 'success' ? `${selectedProvider?.label} verified` :
+                {connectionState.llm.status === 'success' ? `${selectedProvider?.label} Verified` :
                   connectionState.llm.status === 'error' ? 'Failed' :
-                    isLlmConfigured ? `${selectedProvider?.label} - ${config.llmModel}` : 'Not configured'}
+                    isLlmConfigured ? `${selectedProvider?.label}` : 'Not configured'}
               </p>
             </div>
           </CardContent>
@@ -445,10 +448,10 @@ function SettingsContent() {
       </div>
 
       {/* AI Compliance Configuration (Lovable AI) */}
-      <Card className="border-border bg-card">
+      <Card className="glass-card">
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
-            <Sparkles className="h-5 w-5" />
+            <Sparkles className="h-5 w-5 text-primary" />
             AI Compliance Analysis
           </CardTitle>
           <CardDescription>
@@ -474,7 +477,7 @@ function SettingsContent() {
               variant="outline"
               onClick={testAiComplianceConnection}
               disabled={connectionState.aiCompliance.status === 'testing'}
-              className="gap-2"
+              className="gap-2 bg-white/5 border-white/10 hover:bg-white/10 hover:text-white transition-all"
             >
               {getStatusIcon(connectionState.aiCompliance.status)}
               {connectionState.aiCompliance.status === 'testing' ? 'Testing...' : 'Test AI Connection'}
@@ -492,10 +495,10 @@ function SettingsContent() {
       </Card>
 
       {/* Brain API Configuration */}
-      <Card className="border-border bg-card">
+      <Card className="glass-card">
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
-            <Brain className="h-5 w-5" />
+            <Brain className="h-5 w-5 text-primary" />
             Brain API Configuration
           </CardTitle>
           <CardDescription>
@@ -513,7 +516,7 @@ function SettingsContent() {
                 placeholder="https://brain-api.adlaunch.ai"
                 value={config.brainApiUrl}
                 onChange={(e) => setConfig(prev => ({ ...prev, brainApiUrl: e.target.value }))}
-                className="pl-10"
+                className="pl-10 input-premium"
               />
             </div>
           </div>
@@ -528,7 +531,7 @@ function SettingsContent() {
                 placeholder="Enter your Brain API token"
                 value={config.brainApiToken}
                 onChange={(e) => setConfig(prev => ({ ...prev, brainApiToken: e.target.value }))}
-                className="pl-10 pr-10"
+                className="pl-10 pr-10 input-premium"
               />
               <Button
                 type="button"
@@ -551,7 +554,7 @@ function SettingsContent() {
               variant="outline"
               onClick={testBrainConnection}
               disabled={connectionState.brain.status === 'testing' || !config.brainApiUrl || !config.brainApiToken}
-              className="gap-2"
+              className="gap-2 bg-white/5 border-white/10 hover:bg-white/10 hover:text-white transition-all"
             >
               {getStatusIcon(connectionState.brain.status)}
               {connectionState.brain.status === 'testing' ? 'Testing...' : 'Test Connection'}
@@ -569,10 +572,10 @@ function SettingsContent() {
       </Card>
 
       {/* LLM Provider Configuration */}
-      <Card className="border-border bg-card">
+      <Card className="glass-card">
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
-            <Sparkles className="h-5 w-5" />
+            <Sparkles className="h-5 w-5 text-primary" />
             LLM Provider Configuration
           </CardTitle>
           <CardDescription>
@@ -595,7 +598,7 @@ function SettingsContent() {
                 setConnectionState(prev => ({ ...prev, llm: { status: 'idle' } }));
               }}
             >
-              <SelectTrigger id="llmProvider">
+              <SelectTrigger id="llmProvider" className="bg-white/[0.03] border-white/[0.08]">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -614,7 +617,7 @@ function SettingsContent() {
               value={config.llmModel}
               onValueChange={(v) => setConfig(prev => ({ ...prev, llmModel: v }))}
             >
-              <SelectTrigger id="llmModel">
+              <SelectTrigger id="llmModel" className="bg-white/[0.03] border-white/[0.08]">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -637,7 +640,7 @@ function SettingsContent() {
                 placeholder={`Enter your ${selectedProvider?.label || 'LLM'} API key`}
                 value={config.llmApiKey}
                 onChange={(e) => setConfig(prev => ({ ...prev, llmApiKey: e.target.value }))}
-                className="pl-10 pr-10"
+                className="pl-10 pr-10 input-premium"
               />
               <Button
                 type="button"
@@ -672,7 +675,7 @@ function SettingsContent() {
               variant="outline"
               onClick={testLlmConnection}
               disabled={connectionState.llm.status === 'testing' || !config.llmApiKey}
-              className="gap-2"
+              className="gap-2 bg-white/5 border-white/10 hover:bg-white/10 hover:text-white transition-all"
             >
               {getStatusIcon(connectionState.llm.status)}
               {connectionState.llm.status === 'testing' ? 'Testing...' : 'Test Connection'}
