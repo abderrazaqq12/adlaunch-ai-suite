@@ -14,8 +14,6 @@ import {
   CheckCircle2,
   AlertCircle,
   Sparkles,
-  Server,
-  Brain,
   ExternalLink,
   Loader2,
   Zap,
@@ -34,8 +32,6 @@ const LLM_PROVIDERS = [
 const STORAGE_KEY = 'adlaunch_api_config';
 
 interface APIConfig {
-  brainApiUrl: string;
-  brainApiToken: string;
   llmProvider: string;
   llmApiKey: string;
   llmModel: string;
@@ -44,25 +40,20 @@ interface APIConfig {
 type ConnectionStatus = 'idle' | 'testing' | 'success' | 'error';
 
 interface ConnectionState {
-  brain: { status: ConnectionStatus; message?: string };
   llm: { status: ConnectionStatus; message?: string };
   aiCompliance: { status: ConnectionStatus; message?: string };
 }
 
 function SettingsContent() {
   const { toast } = useToast();
-  const [showBrainToken, setShowBrainToken] = useState(false);
   const [showLlmKey, setShowLlmKey] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [connectionState, setConnectionState] = useState<ConnectionState>({
-    brain: { status: 'idle' },
     llm: { status: 'idle' },
     aiCompliance: { status: 'idle' },
   });
 
   const [config, setConfig] = useState<APIConfig>({
-    brainApiUrl: '',
-    brainApiToken: '',
     llmProvider: 'openai',
     llmApiKey: '',
     llmModel: 'gpt-4o-mini',
@@ -81,70 +72,21 @@ function SettingsContent() {
     }
   }, []);
 
-  const testBrainConnection = async () => {
-    if (!config.brainApiUrl || !config.brainApiToken) {
-      toast({
-        title: 'Missing Configuration',
-        description: 'Please enter Brain API URL and token first.',
-        variant: 'destructive',
-      });
-      return;
-    }
-
-    setConnectionState(prev => ({ ...prev, brain: { status: 'testing' } }));
-
-    try {
-      const response = await fetch(`${config.brainApiUrl}/health`, {
-        method: 'GET',
-        headers: {
-          'Authorization': `Bearer ${config.brainApiToken}`,
-          'Content-Type': 'application/json',
-        },
-      });
-
-      if (response.ok) {
-        setConnectionState(prev => ({
-          ...prev,
-          brain: { status: 'success', message: 'Connection successful!' }
-        }));
-        toast({
-          title: 'Brain API Connected',
-          description: 'Successfully connected to the Brain API.',
-        });
-      } else {
-        const errorText = await response.text();
-        setConnectionState(prev => ({
-          ...prev,
-          brain: { status: 'error', message: `Error: ${response.status} - ${errorText}` }
-        }));
-        toast({
-          title: 'Connection Failed',
-          description: `Could not connect: ${response.status}`,
-          variant: 'destructive',
-        });
-      }
-    } catch (error) {
-      const message = error instanceof Error ? error.message : 'Unknown error';
-      setConnectionState(prev => ({
-        ...prev,
-        brain: { status: 'error', message }
-      }));
-      toast({
-        title: 'Connection Failed',
-        description: message,
-        variant: 'destructive',
-      });
-    }
-  };
-
   const testAiComplianceConnection = async () => {
     setConnectionState(prev => ({ ...prev, aiCompliance: { status: 'testing' } }));
 
     try {
+      // Get auth token from Supabase session
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session?.access_token) {
+        throw new Error('Not authenticated. Please log in again.');
+      }
+
       const response = await fetch('https://fzngibjbhrirkdbpxmii.supabase.co/functions/v1/analyze-asset', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
+          'Authorization': `Bearer ${session.access_token}`,
         },
         body: JSON.stringify({
           asset: {
@@ -374,42 +316,6 @@ function SettingsContent() {
           </CardContent>
         </Card>
 
-        {/* Brain API Card */}
-        <Card className={cn(
-          "glass-card transition-all duration-300",
-          connectionState.brain.status === 'success' ? "border-success/30 bg-success/5 shadow-[0_0_15px_rgba(34,197,94,0.1)]" :
-            connectionState.brain.status === 'error' ? "border-destructive/30 bg-destructive/5" :
-              isConfigured ? "border-primary/30 bg-primary/5 shadow-[0_0_15px_rgba(59,130,246,0.1)]" :
-                "border-warning/30 bg-warning/5"
-        )}>
-          <CardContent className="p-4 flex items-center gap-4">
-            <div className={cn(
-              "flex h-12 w-12 items-center justify-center rounded-xl transition-colors",
-              connectionState.brain.status === 'success' ? "bg-success/20 text-success" :
-                connectionState.brain.status === 'error' ? "bg-destructive/20 text-destructive" :
-                  isConfigured ? "bg-primary/20 text-primary" : "bg-warning/20 text-warning"
-            )}>
-              {connectionState.brain.status === 'success' ? (
-                <CheckCircle2 className="h-6 w-6" />
-              ) : connectionState.brain.status === 'error' ? (
-                <AlertCircle className="h-6 w-6" />
-              ) : isConfigured ? (
-                <CheckCircle2 className="h-6 w-6" />
-              ) : (
-                <AlertCircle className="h-6 w-6" />
-              )}
-            </div>
-            <div>
-              <p className="font-semibold text-foreground">Brain API</p>
-              <p className="text-sm text-muted-foreground">
-                {connectionState.brain.status === 'success' ? 'Verified' :
-                  connectionState.brain.status === 'error' ? 'Failed' :
-                    isConfigured ? 'Configured' : 'Not configured'}
-              </p>
-            </div>
-          </CardContent>
-        </Card>
-
         {/* LLM Provider Card */}
         <Card className={cn(
           "glass-card transition-all duration-300",
@@ -488,83 +394,6 @@ function SettingsContent() {
                 connectionState.aiCompliance.status === 'success' ? "text-success" : "text-destructive"
               )}>
                 {connectionState.aiCompliance.message}
-              </span>
-            )}
-          </div>
-        </CardContent>
-      </Card>
-
-      {/* Brain API Configuration */}
-      <Card className="glass-card">
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <Brain className="h-5 w-5 text-primary" />
-            Brain API Configuration
-          </CardTitle>
-          <CardDescription>
-            Connect to the AdLaunch Brain service for AI compliance, decisions, and campaign orchestration.
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="space-y-2">
-            <Label htmlFor="brainUrl">Brain API URL</Label>
-            <div className="relative">
-              <Server className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-              <Input
-                id="brainUrl"
-                type="url"
-                placeholder="https://brain-api.adlaunch.ai"
-                value={config.brainApiUrl}
-                onChange={(e) => setConfig(prev => ({ ...prev, brainApiUrl: e.target.value }))}
-                className="pl-10 input-premium"
-              />
-            </div>
-          </div>
-
-          <div className="space-y-2">
-            <Label htmlFor="brainToken">API Token</Label>
-            <div className="relative">
-              <Key className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-              <Input
-                id="brainToken"
-                type={showBrainToken ? 'text' : 'password'}
-                placeholder="Enter your Brain API token"
-                value={config.brainApiToken}
-                onChange={(e) => setConfig(prev => ({ ...prev, brainApiToken: e.target.value }))}
-                className="pl-10 pr-10 input-premium"
-              />
-              <Button
-                type="button"
-                variant="ghost"
-                size="icon"
-                className="absolute right-1 top-1/2 h-7 w-7 -translate-y-1/2"
-                onClick={() => setShowBrainToken(!showBrainToken)}
-              >
-                {showBrainToken ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-              </Button>
-            </div>
-            <p className="text-xs text-muted-foreground">
-              Your API token for authenticating with the Brain service.
-            </p>
-          </div>
-
-          {/* Test Connection Button */}
-          <div className="flex items-center gap-3 pt-2">
-            <Button
-              variant="outline"
-              onClick={testBrainConnection}
-              disabled={connectionState.brain.status === 'testing' || !config.brainApiUrl || !config.brainApiToken}
-              className="gap-2 bg-white/5 border-white/10 hover:bg-white/10 hover:text-white transition-all"
-            >
-              {getStatusIcon(connectionState.brain.status)}
-              {connectionState.brain.status === 'testing' ? 'Testing...' : 'Test Connection'}
-            </Button>
-            {connectionState.brain.message && (
-              <span className={cn(
-                "text-sm",
-                connectionState.brain.status === 'success' ? "text-success" : "text-destructive"
-              )}>
-                {connectionState.brain.message}
               </span>
             )}
           </div>
