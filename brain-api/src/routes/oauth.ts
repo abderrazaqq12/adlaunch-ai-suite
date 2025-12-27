@@ -32,7 +32,7 @@ function isValidPlatform(platform: string): platform is Platform {
 // ============================================================================
 
 const connectQuerySchema = z.object({
-    projectId: z.string().uuid(),
+    projectId: z.string().min(1),
     redirect: z.string().optional()
 })
 
@@ -146,7 +146,7 @@ app.get('/:platform/callback', async (c) => {
 // ============================================================================
 
 const listQuerySchema = z.object({
-    projectId: z.string().uuid().optional()
+    projectId: z.string().optional()
 })
 
 app.get('/ad-accounts', zValidator('query', listQuerySchema), async (c) => {
