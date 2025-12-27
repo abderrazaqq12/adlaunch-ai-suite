@@ -15,12 +15,12 @@ import {
 
 export default function Dashboard() {
   const navigate = useNavigate();
-  const { currentProject, assets, campaigns, rules } = useProjectStore();
+  const { currentProject, assets = [], campaigns = [], rules = [] } = useProjectStore();
 
   // Calculate stats
   const projectAssets = assets.filter(a => a.projectId === currentProject?.id);
   const approvedAssets = projectAssets.filter(a => a.status === 'APPROVED' || a.status === 'READY_FOR_LAUNCH').length;
-  const connectedAccounts = currentProject?.connections.length || 0;
+  const connectedAccounts = currentProject?.connections?.length || 0;
   const activeCampaigns = campaigns.filter(c =>
     c.projectId === currentProject?.id &&
     (c.status === 'active' || c.status === 'pending')

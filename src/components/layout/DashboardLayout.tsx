@@ -55,16 +55,27 @@ export function DashboardLayout() {
               {/* Date */}
               <Popover open={isCalendarOpen} onOpenChange={setIsCalendarOpen}>
                 <PopoverTrigger asChild>
-                  <button className="bg-red-500 text-white p-2 rounded">
-                    DEBUG DATE
-                  </button>
+                  <Button
+                    variant={"outline"}
+                    className={cn(
+                      "w-[240px] justify-start text-left font-normal bg-white/5 border-white/10 hover:bg-white/10 hover:text-white",
+                      !date && "text-muted-foreground"
+                    )}
+                  >
+                    <CalendarIcon className="mr-2 h-4 w-4" />
+                    {date ? format(date, "PPP") : <span>Pick a date</span>}
+                  </Button>
                 </PopoverTrigger>
-                <PopoverContent className="w-auto p-4 bg-white text-black" align="end">
-                  <div>
-                    Popover Content Here
-                    <br />
-                    Date: {date?.toISOString()}
-                  </div>
+                <PopoverContent className="w-auto p-0" align="end">
+                  <Calendar
+                    mode="single"
+                    selected={date}
+                    onSelect={(newDate) => {
+                      setDate(newDate);
+                      setIsCalendarOpen(false);
+                    }}
+                    initialFocus
+                  />
                 </PopoverContent>
               </Popover>
 
