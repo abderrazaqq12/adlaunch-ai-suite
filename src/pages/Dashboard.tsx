@@ -1,219 +1,216 @@
-import { useNavigate } from 'react-router-dom';
-import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { useMemo } from 'react';
 import { useProjectStore } from '@/stores/projectStore';
 import {
-  Upload,
-  Link2,
-  Rocket,
-  CheckCircle2,
-  Zap,
-  ArrowRight,
-  Target,
-  Activity,
-} from 'lucide-react';
+  LaunchReadinessCard,
+  ComplianceSummary,
+  PlatformRiskHeatmap,
+  AssetsStatusGrid,
+  ConnectedPlatformsCard,
+  ProtectionStatusPanel,
+  CriticalEventsTimeline,
+  QuickActions,
+} from '@/components/dashboard';
+import type { ReadinessStatus } from '@/components/dashboard/LaunchReadinessCard';
 
 export default function Dashboard() {
-  const navigate = useNavigate();
-  const { currentProject, assets = [], campaigns = [], rules = [] } = useProjectStore();
+  const { currentProject, assets = [] } = useProjectStore();
 
-  // Calculate stats
-  const projectAssets = assets.filter(a => a.projectId === currentProject?.id);
-  const approvedAssets = projectAssets.filter(a => a.status === 'APPROVED' || a.status === 'READY_FOR_LAUNCH').length;
-  const connectedAccounts = currentProject?.connections?.length || 0;
-  const activeCampaigns = campaigns.filter(c =>
-    c.projectId === currentProject?.id &&
-    (c.status === 'active' || c.status === 'pending')
-  ).length;
-  const activeRules = rules.filter(r => r.projectId === currentProject?.id && r.enabled).length;
+  // Get assets for current project
+  const projectAssets = useMemo(() =>
+    assets.filter(a => a.projectId === currentProject?.id),
+    [assets, currentProject?.id]
+  );
+
+  // Calculate compliance stats
+  const complianceStats = useMemo(() => {
+    const approved = projectAssets.filter(a => a.state === 'APPROVED' || a.state === 'READY_FOR_LAUNCH').length;
+    const blockedHard = projectAssets.filter(a => a.state === 'BLOCKED_HARD').length;
+    const blockedSoft = projectAssets.filter(a => a.state === 'BLOCKED_SOFT').length;
+    const autoRewriteAvailable = projectAssets.filter(a =>
+      a.state === 'BLOCKED_SOFT' && a.type === 'text'
+    ).length;
+
+    return { approved, blockedHard, blockedSoft, autoRewriteAvailable };
+  }, [projectAssets]);
+
+  // Determine launch readiness status
+  const { readinessStatus, blockingReasons } = useMemo(() => {
+    const reasons: Array<{ type: 'hard' | 'soft' | 'account' | 'compliance'; message: string; count?: number }> = [];
+
+    const connections = currentProject?.connections || [];
+    const hasAccountConnected = connections.length > 0;
+
+    // Hard blocks
+    if (complianceStats.blockedHard > 0) {
+      reasons.push({
+        type: 'hard',
+        message: `${complianceStats.blockedHard} assets BLOCKED (Hard violation)`,
+        count: complianceStats.blockedHard,
+      });
+    }
+
+    if (!hasAccountConnected) {
+      reasons.push({
+        type: 'account',
+        message: 'Missing Ad Account connection',
+      });
+    }
+
+    // Soft blocks
+    if (complianceStats.blockedSoft > 0) {
+      reasons.push({
+        type: 'soft',
+        message: `${complianceStats.blockedSoft} assets need fix (Soft violation)`,
+        count: complianceStats.blockedSoft,
+      });
+    }
+
+    // Determine status
+    let status: ReadinessStatus = 'READY';
+
+    if (complianceStats.blockedHard > 0 || !hasAccountConnected) {
+      status = 'NOT_READY';
+    } else if (complianceStats.blockedSoft > 0) {
+      status = 'PARTIALLY_READY';
+    } else if (projectAssets.length === 0) {
+      status = 'NOT_READY';
+      reasons.push({
+        type: 'compliance',
+        message: 'No assets uploaded for compliance check',
+      });
+    }
+
+    return { readinessStatus: status, blockingReasons: reasons };
+  }, [complianceStats, currentProject?.connections, projectAssets.length]);
+
+  // Platform risk levels
+  const platformRisks = useMemo(() => {
+    const calculateRisk = (platform: 'google' | 'tiktok' | 'snapchat') => {
+      const platformAssets = projectAssets.filter(a =>
+        a.platforms?.includes(platform) || true // All assets apply if no platform specified
+      );
+
+      if (platformAssets.length === 0) return { risk: 'none' as const, count: 0 };
+
+      const hasHard = platformAssets.some(a => a.state === 'BLOCKED_HARD');
+      const hasSoft = platformAssets.some(a => a.state === 'BLOCKED_SOFT');
+
+      if (hasHard) return { risk: 'high' as const, count: platformAssets.length };
+      if (hasSoft) return { risk: 'medium' as const, count: platformAssets.length };
+      return { risk: 'low' as const, count: platformAssets.length };
+    };
+
+    return [
+      { platform: 'google' as const, ...calculateRisk('google') },
+      { platform: 'tiktok' as const, ...calculateRisk('tiktok') },
+      { platform: 'snapchat' as const, ...calculateRisk('snapchat') },
+    ].map(p => ({ platform: p.platform, risk: p.risk, assetCount: p.count }));
+  }, [projectAssets]);
+
+  // Transform assets for grid
+  const gridAssets = useMemo(() =>
+    projectAssets.slice(0, 10).map(a => ({
+      id: a.id,
+      name: a.name || 'Untitled Asset',
+      type: a.type as 'video' | 'image' | 'text',
+      status: (a.state === 'APPROVED' || a.state === 'READY_FOR_LAUNCH')
+        ? 'APPROVED' as const
+        : a.state === 'BLOCKED_HARD'
+          ? 'BLOCKED_HARD' as const
+          : a.state === 'BLOCKED_SOFT'
+            ? 'BLOCKED_SOFT' as const
+            : a.state === 'ANALYZING'
+              ? 'ANALYZING' as const
+              : 'PENDING' as const,
+      riskScore: a.policyRiskScore || 0,
+      platforms: ['google', 'tiktok', 'snapchat'] as const,
+      canAutoRewrite: a.type === 'text' && a.state === 'BLOCKED_SOFT',
+    })),
+    [projectAssets]
+  );
+
+  // Platform connections
+  const connections = useMemo(() => {
+    const projectConnections = currentProject?.connections || [];
+
+    return ['google', 'tiktok', 'snapchat'].map(platform => {
+      const conn = projectConnections.find(c => c.platform === platform);
+      return {
+        platform: platform as 'google' | 'tiktok' | 'snapchat',
+        status: conn?.isActive
+          ? 'connected' as const
+          : conn
+            ? 'expired' as const
+            : 'not_connected' as const,
+        accountName: conn?.accountName,
+        lastSync: conn?.lastSync ? new Date(conn.lastSync).toLocaleDateString() : undefined,
+      };
+    });
+  }, [currentProject?.connections]);
+
+  // Protection settings (default states)
+  const protectionSettings = {
+    autoBlockOnViolation: true,
+    autoRewriteText: false,
+    autoPauseOnViolation: true,
+    manualReviewRequired: false,
+  };
+
+  // Critical events (from asset analysis history)
+  const criticalEvents = useMemo(() =>
+    projectAssets
+      .filter(a => a.state === 'BLOCKED_HARD' || a.state === 'BLOCKED_SOFT')
+      .slice(0, 5)
+      .map(a => ({
+        id: a.id,
+        type: a.state === 'BLOCKED_HARD' ? 'blocked' as const : 'needs_fix' as const,
+        message: `${a.name || 'Asset'} ${a.state === 'BLOCKED_HARD' ? 'was blocked' : 'needs fix'}`,
+        timestamp: a.analyzedAt ? new Date(a.analyzedAt).toLocaleString() : 'Recently',
+        assetId: a.id,
+      })),
+    [projectAssets]
+  );
 
   return (
-    <div className="mx-auto max-w-3xl space-y-6">
-      {/* Welcome Header */}
+    <div className="space-y-6">
+      {/* Header */}
       <div>
-        <h1 className="text-2xl font-bold text-foreground">My Campaigns</h1>
+        <h1 className="text-2xl font-bold text-foreground">Launch Control Center</h1>
         <p className="text-muted-foreground">
-          {connectedAccounts} accounts connected • AI-powered optimization active
+          AI Compliance, Risk Management & Campaign Launch Protection
         </p>
       </div>
 
-      {/* Stats Grid */}
-      <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-4">
-        {/* Connected Accounts */}
-        <Card className="border-border bg-card">
-          <CardContent className="p-6">
-            <div className="flex items-center gap-4">
-              <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-blue-500/10">
-                <Link2 className="h-6 w-6 text-blue-400" />
-              </div>
-              <div>
-                <p className="text-3xl font-bold text-foreground">{connectedAccounts}</p>
-                <p className="text-sm text-muted-foreground">Accounts</p>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-
-        {/* Assets */}
-        <Card className="border-border bg-card">
-          <CardContent className="p-6">
-            <div className="flex items-center gap-4">
-              <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-green-500/10">
-                <CheckCircle2 className="h-6 w-6 text-green-400" />
-              </div>
-              <div>
-                <p className="text-3xl font-bold text-foreground">
-                  {approvedAssets}
-                  <span className="text-lg font-normal text-muted-foreground ml-1">/ {projectAssets.length}</span>
-                </p>
-                <p className="text-sm text-muted-foreground">Assets Ready</p>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-
-        {/* Active Campaigns */}
-        <Card className="border-border bg-card">
-          <CardContent className="p-6">
-            <div className="flex items-center gap-4">
-              <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-purple-500/10">
-                <Rocket className="h-6 w-6 text-purple-400" />
-              </div>
-              <div>
-                <p className="text-3xl font-bold text-foreground">{activeCampaigns}</p>
-                <p className="text-sm text-muted-foreground">Campaigns</p>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-
-        {/* Active Rules */}
-        <Card className="border-border bg-card">
-          <CardContent className="p-6">
-            <div className="flex items-center gap-4">
-              <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-amber-500/10">
-                <Zap className="h-6 w-6 text-amber-400" />
-              </div>
-              <div>
-                <p className="text-3xl font-bold text-foreground">{activeRules}</p>
-                <p className="text-sm text-muted-foreground">Active Rules</p>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-      </div>
+      {/* 1. Launch Readiness - PRIMARY */}
+      <LaunchReadinessCard
+        status={readinessStatus}
+        blockingReasons={blockingReasons}
+      />
 
       {/* Quick Actions */}
-      <Card className="border-border bg-card">
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <Target className="h-5 w-5" />
-            Quick Actions
-          </CardTitle>
-          <CardDescription>
-            Start building your ad campaigns
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-            <button
-              onClick={() => navigate('/assets')}
-              className="p-4 rounded-lg border border-border bg-muted/30 hover:bg-muted/50 hover:border-primary/30 transition-all text-left"
-            >
-              <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-primary/10 mb-3">
-                <Upload className="h-5 w-5 text-primary" />
-              </div>
-              <h3 className="font-medium text-foreground">Upload Assets</h3>
-              <p className="text-sm text-muted-foreground mt-1">Add videos and ad copy</p>
-            </button>
+      <QuickActions
+        hasBlockingIssues={complianceStats.blockedHard > 0 || complianceStats.blockedSoft > 0}
+        hasUnconnectedAccounts={connections.some(c => c.status !== 'connected')}
+        isReadyToLaunch={readinessStatus === 'READY'}
+      />
 
-            <button
-              onClick={() => navigate('/connections')}
-              className="p-4 rounded-lg border border-border bg-muted/30 hover:bg-muted/50 hover:border-primary/30 transition-all text-left"
-            >
-              <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-blue-500/10 mb-3">
-                <Link2 className="h-5 w-5 text-blue-400" />
-              </div>
-              <h3 className="font-medium text-foreground">Connect Account</h3>
-              <p className="text-sm text-muted-foreground mt-1">Link ad platforms</p>
-            </button>
+      {/* 2. Compliance & Risk Overview */}
+      <div className="grid gap-6 lg:grid-cols-2">
+        <ComplianceSummary stats={complianceStats} />
+        <PlatformRiskHeatmap platforms={platformRisks} />
+      </div>
 
-            <button
-              onClick={() => navigate('/launch')}
-              className="p-4 rounded-lg border border-border bg-muted/30 hover:bg-muted/50 hover:border-primary/30 transition-all text-left"
-            >
-              <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-purple-500/10 mb-3">
-                <Rocket className="h-5 w-5 text-purple-400" />
-              </div>
-              <h3 className="font-medium text-foreground">Launch Campaign</h3>
-              <p className="text-sm text-muted-foreground mt-1">Publish to platforms</p>
-            </button>
+      {/* 3 & 4. Assets & Accounts */}
+      <div className="grid gap-6 lg:grid-cols-2">
+        <AssetsStatusGrid assets={gridAssets} />
+        <ConnectedPlatformsCard connections={connections} />
+      </div>
 
-            <button
-              onClick={() => navigate('/rules')}
-              className="p-4 rounded-lg border border-border bg-muted/30 hover:bg-muted/50 hover:border-primary/30 transition-all text-left"
-            >
-              <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-amber-500/10 mb-3">
-                <Zap className="h-5 w-5 text-amber-400" />
-              </div>
-              <h3 className="font-medium text-foreground">Add Automation</h3>
-              <p className="text-sm text-muted-foreground mt-1">Create AI rules</p>
-            </button>
-          </div>
-        </CardContent>
-      </Card>
-
-      {/* Getting Started */}
-      {projectAssets.length === 0 && connectedAccounts === 0 && (
-        <Card className="border-primary/20 bg-primary/5">
-          <CardContent className="p-6">
-            <div className="flex items-center gap-3 mb-4">
-              <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-primary text-primary-foreground">
-                <Rocket className="h-5 w-5" />
-              </div>
-              <div>
-                <p className="font-medium text-foreground">Get Started</p>
-                <p className="text-sm text-muted-foreground">Upload assets and connect ad accounts</p>
-              </div>
-            </div>
-            <div className="flex flex-wrap gap-3">
-              <Button onClick={() => navigate('/assets')} className="gap-2">
-                <Upload className="h-4 w-4" />
-                Upload Assets
-              </Button>
-              <Button variant="outline" onClick={() => navigate('/connections')} className="gap-2">
-                <Link2 className="h-4 w-4" />
-                Connect Account
-              </Button>
-            </div>
-          </CardContent>
-        </Card>
-      )}
-
-      {/* Activity Section */}
-      <Card className="border-border bg-card">
-        <CardHeader className="flex flex-row items-center justify-between">
-          <div>
-            <CardTitle className="flex items-center gap-2">
-              <Activity className="h-5 w-5" />
-              Recent Activity
-            </CardTitle>
-            <CardDescription>
-              Real-time updates from your campaigns
-            </CardDescription>
-          </div>
-          <Button variant="ghost" size="sm" className="text-muted-foreground" onClick={() => navigate('/monitoring')}>
-            View all
-            <ArrowRight className="h-4 w-4 ml-1" />
-          </Button>
-        </CardHeader>
-        <CardContent>
-          <div className="flex items-center gap-4 p-4 rounded-lg border border-border bg-muted/30 text-muted-foreground">
-            <Activity className="h-5 w-5" />
-            <p>No recent activity. Start by uploading assets or connecting an ad account.</p>
-          </div>
-        </CardContent>
-      </Card>
+      {/* 5 & 6. Protection & Events */}
+      <div className="grid gap-6 lg:grid-cols-2">
+        <ProtectionStatusPanel settings={protectionSettings} />
+        <CriticalEventsTimeline events={criticalEvents} />
+      </div>
     </div>
   );
 }

@@ -5,26 +5,106 @@
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap');
 
 @layer base {
+
+  /* ================================
+   * LIGHT MODE (Default)
+   * Clean, professional, AdPortal-inspired
+   * ================================ */
   :root {
-    /* Premium Dark SaaS Theme - Deep Space Blue/Black Base */
+    /* Background & Surface */
+    --background: 210 40% 98%;
+    /* #F8FAFC - slate-50 */
+    --foreground: 222 47% 11%;
+    /* #1E293B - slate-800 */
+
+    --card: 0 0% 100%;
+    /* White */
+    --card-foreground: 222 47% 11%;
+
+    --popover: 0 0% 100%;
+    --popover-foreground: 222 47% 11%;
+
+    /* Primary Blue - AdPortal style */
+    --primary: 217 91% 60%;
+    /* #3B82F6 */
+    --primary-foreground: 0 0% 100%;
+
+    --secondary: 210 40% 96%;
+    /* #F1F5F9 */
+    --secondary-foreground: 222 47% 11%;
+
+    --muted: 210 40% 96%;
+    --muted-foreground: 215 16% 47%;
+    /* #64748B */
+
+    --accent: 217 91% 60%;
+    --accent-foreground: 0 0% 100%;
+
+    --destructive: 0 84% 60%;
+    --destructive-foreground: 0 0% 100%;
+
+    --success: 142 71% 45%;
+    --success-foreground: 0 0% 100%;
+
+    --warning: 38 92% 50%;
+    --warning-foreground: 222 47% 11%;
+
+    /* Borders & Inputs */
+    --border: 214 32% 91%;
+    /* #E2E8F0 */
+    --input: 214 32% 91%;
+    --ring: 217 91% 60%;
+
+    --radius: 0.5rem;
+
+    /* Platform Colors */
+    --google: 217 89% 61%;
+    --google-red: 4 90% 58%;
+    --google-yellow: 45 93% 47%;
+    --google-green: 142 71% 45%;
+
+    --tiktok: 180 100% 50%;
+    --tiktok-pink: 340 82% 59%;
+
+    --snapchat: 54 100% 50%;
+
+    /* Sidebar - Blue theme like AdPortal */
+    --sidebar-background: 217 91% 60%;
+    /* Blue */
+    --sidebar-foreground: 0 0% 100%;
+    --sidebar-primary: 0 0% 100%;
+    --sidebar-primary-foreground: 217 91% 60%;
+    --sidebar-accent: 0 0% 100% / 0.15;
+    --sidebar-accent-foreground: 0 0% 100%;
+    --sidebar-border: 0 0% 100% / 0.1;
+    --sidebar-ring: 0 0% 100%;
+    --sidebar-muted: 0 0% 100% / 0.6;
+
+    /* Shadows */
+    --shadow-sm: 0 1px 2px 0 rgb(0 0 0 / 0.05);
+    --shadow-md: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
+    --shadow-lg: 0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1);
+  }
+
+  /* ================================
+   * DARK MODE
+   * Premium deep space blue theme
+   * ================================ */
+  .dark {
     --background: 224 71% 4%;
-    /* #030612 - Very deep blue-black */
+    /* #030612 */
     --foreground: 210 40% 98%;
 
-    --card: 224 71% 4%;
-    /* Matching background for seamless look, used with glass utils */
+    --card: 224 71% 6%;
     --card-foreground: 210 40% 98%;
 
     --popover: 224 71% 5%;
     --popover-foreground: 210 40% 98%;
 
-    /* Vivid Primary Blue - Optimized for dark mode glow */
     --primary: 217 91% 60%;
-    /* #3B82F6 */
     --primary-foreground: 0 0% 100%;
 
-    --secondary: 224 71% 8%;
-    /* Slightly lighter than bg */
+    --secondary: 224 71% 10%;
     --secondary-foreground: 210 40% 98%;
 
     --muted: 224 71% 12%;
@@ -42,35 +122,12 @@
     --warning: 35 92% 51%;
     --warning-foreground: 222 47% 6%;
 
-    /* Borders are subtle and glass-like */
     --border: 217 91% 60% / 0.1;
-    /* Very subtle blue tint */
     --input: 224 71% 10%;
     --ring: 217 91% 60%;
 
-    --radius: 0.5rem;
-    /* Stricter radius for premium feel */
-
-    /* Platform Colors */
-    --google: 217 89% 61%;
-    --google-red: 4 90% 58%;
-    --google-yellow: 45 93% 47%;
-    --google-green: 142 71% 45%;
-
-    --tiktok: 180 100% 50%;
-    --tiktok-pink: 340 82% 59%;
-
-    --snapchat: 54 100% 50%;
-
-    /* Premium Gradients */
-    --gradient-primary: linear-gradient(135deg, hsl(217 91% 60%) 0%, hsl(224 76% 48%) 100%);
-    --gradient-success: linear-gradient(135deg, hsl(142 76% 36%) 0%, hsl(160 84% 39%) 100%);
-    --gradient-surface: linear-gradient(180deg, rgba(255, 255, 255, 0.03) 0%, rgba(255, 255, 255, 0.01) 100%);
-    --gradient-glass: linear-gradient(180deg, rgba(255, 255, 255, 0.05) 0%, rgba(255, 255, 255, 0.0) 100%);
-
-    /* Sidebar Specifics */
+    /* Dark sidebar */
     --sidebar-background: 224 71% 3%;
-    /* Even darker for sidebar */
     --sidebar-foreground: 210 40% 90%;
     --sidebar-primary: 217 91% 60%;
     --sidebar-primary-foreground: 0 0% 100%;
@@ -78,9 +135,11 @@
     --sidebar-accent-foreground: 210 40% 98%;
     --sidebar-border: 217 91% 60% / 0.05;
     --sidebar-ring: 217 91% 60%;
+    --sidebar-muted: 215 20% 65%;
 
-    /* Shadows */
-    --shadow-glow: 0 0 20px hsl(217 91% 60% / 0.15);
+    --shadow-sm: 0 1px 2px 0 rgb(0 0 0 / 0.3);
+    --shadow-md: 0 4px 6px -1px rgb(0 0 0 / 0.4);
+    --shadow-lg: 0 10px 15px -3px rgb(0 0 0 / 0.5);
   }
 }
 
@@ -91,6 +150,10 @@
 
   body {
     @apply bg-background text-foreground font-sans antialiased selection:bg-primary/20 selection:text-primary;
+  }
+
+  /* Dark mode background effects */
+  .dark body {
     background-image:
       radial-gradient(circle at 50% 0%, hsl(217 91% 60% / 0.08) 0%, transparent 40%),
       radial-gradient(circle at 100% 0%, hsl(263 91% 66% / 0.05) 0%, transparent 30%);
@@ -108,33 +171,62 @@
   }
 
   ::-webkit-scrollbar-thumb {
-    @apply bg-white/10 rounded-full hover:bg-white/20 transition-colors;
+    @apply bg-muted-foreground/20 rounded-full hover:bg-muted-foreground/30 transition-colors;
   }
 }
 
 @layer components {
 
-  /* Glassmorphism Utilities */
-  .glass-panel {
+  /* Card styles with proper shadows */
+  .card-elevated {
+    @apply bg-card border border-border rounded-xl;
+    box-shadow: var(--shadow-md);
+  }
+
+  /* Glass effects for dark mode */
+  .dark .glass-panel {
     @apply bg-white/[0.03] backdrop-blur-xl border border-white/[0.05] shadow-lg;
   }
 
-  .glass-card {
+  .dark .glass-card {
     @apply bg-card/60 backdrop-blur-md border border-white/[0.05] hover:border-white/[0.1] transition-all duration-300;
+  }
+
+  /* Light mode cards */
+  .light-card {
+    @apply bg-white border border-border rounded-xl;
+    box-shadow: var(--shadow-md);
   }
 
   /* Premium Inputs */
   .input-premium {
-    @apply bg-white/[0.03] border-white/[0.08] focus:border-primary/50 focus:ring-primary/20 transition-all;
+    @apply bg-background border-border focus:border-primary focus:ring-primary/20 transition-all;
   }
 
-  /* Badges & Status */
-  .badge-glow {
-    @apply shadow-[0_0_10px_rgba(59, 130, 246, 0.3)] border-primary/20;
+  .dark .input-premium {
+    @apply bg-white/[0.03] border-white/[0.08] focus:border-primary/50 focus:ring-primary/20;
   }
 
+  /* Stat cards */
   .stat-card {
-    @apply relative overflow-hidden rounded-xl border border-white/[0.05] bg-card/40 p-6 backdrop-blur-sm transition-all hover:bg-card/60 hover:border-white/[0.1];
+    @apply relative overflow-hidden rounded-xl border border-border bg-card p-6 transition-all hover:shadow-lg;
+  }
+
+  .dark .stat-card {
+    @apply border-white/[0.05] bg-card/40 backdrop-blur-sm hover:bg-card/60 hover:border-white/[0.1];
+  }
+
+  /* Quick action cards - colorful */
+  .action-card-blue {
+    @apply bg-primary text-white rounded-xl p-4 hover:opacity-90 transition-all cursor-pointer;
+  }
+
+  .action-card-purple {
+    @apply bg-violet-600 text-white rounded-xl p-4 hover:opacity-90 transition-all cursor-pointer;
+  }
+
+  .action-card-green {
+    @apply bg-emerald-500 text-white rounded-xl p-4 hover:opacity-90 transition-all cursor-pointer;
   }
 
   /* Animations */

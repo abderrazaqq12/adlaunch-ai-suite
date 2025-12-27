@@ -545,6 +545,14 @@ export const brainClient = {
 
     try {
       const headers = await buildHeaders(projectId);
+
+      // Get Gemini API key from localStorage
+      const storedConfig = localStorage.getItem('adlaunch_api_config');
+      const geminiApiKey = storedConfig ? JSON.parse(storedConfig).geminiApiKey : '';
+      if (geminiApiKey) {
+        (headers as Record<string, string>)['X-Gemini-Key'] = geminiApiKey;
+      }
+
       const response = await fetch(`${SUPABASE_FUNCTIONS_URL}/analyze-asset`, {
         method: 'POST',
         headers,
@@ -588,6 +596,14 @@ export const brainClient = {
 
     try {
       const headers = await buildHeaders(projectId);
+
+      // Get Gemini API key from localStorage
+      const storedConfig = localStorage.getItem('adlaunch_api_config');
+      const geminiApiKey = storedConfig ? JSON.parse(storedConfig).geminiApiKey : '';
+      if (geminiApiKey) {
+        (headers as Record<string, string>)['X-Gemini-Key'] = geminiApiKey;
+      }
+
       const response = await fetch(`${SUPABASE_FUNCTIONS_URL}/analyze-asset`, {
         method: 'POST',
         headers,

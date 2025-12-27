@@ -5,6 +5,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { useProjectStore } from "@/stores/projectStore";
 import { DashboardLayout } from "@/components/layout/DashboardLayout";
+import { ThemeProvider } from "@/components/ThemeProvider";
 
 // Pages
 import Auth from "./pages/Auth";
@@ -73,66 +74,68 @@ function ApprovedRoute({ children }: { children: React.ReactNode }) {
 }
 
 const App = () => (
-  <QueryClientProvider client={queryClient}>
-    <TooltipProvider>
-      <Toaster />
-      <Sonner />
-      <BrowserRouter>
-        <Routes>
-          {/* Public marketing pages */}
-          <Route element={<PublicLayout />}>
-            <Route path="/" element={<Landing />} />
-            <Route path="/about" element={<About />} />
-            <Route path="/privacy" element={<Privacy />} />
-            <Route path="/terms" element={<Terms />} />
-            <Route path="/contact" element={<Contact />} />
-          </Route>
+  <ThemeProvider>
+    <QueryClientProvider client={queryClient}>
+      <TooltipProvider>
+        <Toaster />
+        <Sonner />
+        <BrowserRouter>
+          <Routes>
+            {/* Public marketing pages */}
+            <Route element={<PublicLayout />}>
+              <Route path="/" element={<Landing />} />
+              <Route path="/about" element={<About />} />
+              <Route path="/privacy" element={<Privacy />} />
+              <Route path="/terms" element={<Terms />} />
+              <Route path="/contact" element={<Contact />} />
+            </Route>
 
-          {/* Auth route */}
-          <Route
-            path="/auth"
-            element={
-              <AuthRoute>
-                <Auth />
-              </AuthRoute>
-            }
-          />
+            {/* Auth route */}
+            <Route
+              path="/auth"
+              element={
+                <AuthRoute>
+                  <Auth />
+                </AuthRoute>
+              }
+            />
 
-          {/* Pending approval page */}
-          <Route path="/pending-approval" element={<PendingApproval />} />
+            {/* Pending approval page */}
+            <Route path="/pending-approval" element={<PendingApproval />} />
 
-          {/* OAuth callback routes - outside protected area */}
-          <Route path="/oauth-success" element={<OAuthSuccess />} />
-          <Route path="/oauth-error" element={<OAuthError />} />
+            {/* OAuth callback routes - outside protected area */}
+            <Route path="/oauth-success" element={<OAuthSuccess />} />
+            <Route path="/oauth-error" element={<OAuthError />} />
 
-          {/* Protected dashboard routes - requires approval */}
-          <Route
-            element={
-              <ApprovedRoute>
-                <DashboardLayout />
-              </ApprovedRoute>
-            }
-          >
-            <Route path="/dashboard" element={<Dashboard />} />
-            <Route path="/assets" element={<Assets />} />
-            <Route path="/connections" element={<Connections />} />
-            <Route path="/launch" element={<Launch />} />
-            <Route path="/execution" element={<Execution />} />
-            <Route path="/rules" element={<Rules />} />
-            <Route path="/monitoring" element={<Monitoring />} />
-            <Route path="/recovery" element={<Recovery />} />
-            <Route path="/settings" element={<Settings />} />
-            {/* Redirect old routes */}
-            <Route path="/history" element={<Navigate to="/execution" replace />} />
-            <Route path="/analyze" element={<Navigate to="/assets" replace />} />
-          </Route>
+            {/* Protected dashboard routes - requires approval */}
+            <Route
+              element={
+                <ApprovedRoute>
+                  <DashboardLayout />
+                </ApprovedRoute>
+              }
+            >
+              <Route path="/dashboard" element={<Dashboard />} />
+              <Route path="/assets" element={<Assets />} />
+              <Route path="/connections" element={<Connections />} />
+              <Route path="/launch" element={<Launch />} />
+              <Route path="/execution" element={<Execution />} />
+              <Route path="/rules" element={<Rules />} />
+              <Route path="/monitoring" element={<Monitoring />} />
+              <Route path="/recovery" element={<Recovery />} />
+              <Route path="/settings" element={<Settings />} />
+              {/* Redirect old routes */}
+              <Route path="/history" element={<Navigate to="/execution" replace />} />
+              <Route path="/analyze" element={<Navigate to="/assets" replace />} />
+            </Route>
 
-          {/* Catch-all */}
-          <Route path="*" element={<NotFound />} />
-        </Routes>
-      </BrowserRouter>
-    </TooltipProvider>
-  </QueryClientProvider>
+            {/* Catch-all */}
+            <Route path="*" element={<NotFound />} />
+          </Routes>
+        </BrowserRouter>
+      </TooltipProvider>
+    </QueryClientProvider>
+  </ThemeProvider>
 );
 
 export default App;

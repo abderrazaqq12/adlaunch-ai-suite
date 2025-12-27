@@ -6,6 +6,7 @@ import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useToast } from '@/hooks/use-toast';
 import { ProjectGate } from '@/components/common/ProjectGate';
+import { supabase } from '@/integrations/supabase/client';
 import {
   Key,
   Save,
@@ -32,6 +33,7 @@ const LLM_PROVIDERS = [
 const STORAGE_KEY = 'adlaunch_api_config';
 
 interface APIConfig {
+  geminiApiKey: string;
   llmProvider: string;
   llmApiKey: string;
   llmModel: string;
@@ -47,6 +49,7 @@ interface ConnectionState {
 function SettingsContent() {
   const { toast } = useToast();
   const [showLlmKey, setShowLlmKey] = useState(false);
+  const [showGeminiKey, setShowGeminiKey] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [connectionState, setConnectionState] = useState<ConnectionState>({
     llm: { status: 'idle' },
@@ -54,6 +57,7 @@ function SettingsContent() {
   });
 
   const [config, setConfig] = useState<APIConfig>({
+    geminiApiKey: '',
     llmProvider: 'openai',
     llmApiKey: '',
     llmModel: 'gpt-4o-mini',
@@ -82,11 +86,16 @@ function SettingsContent() {
         throw new Error('Not authenticated. Please log in again.');
       }
 
+      if (!config.geminiApiKey) {
+        throw new Error('Please enter your Gemini API key first.');
+      }
+
       const response = await fetch('https://fzngibjbhrirkdbpxmii.supabase.co/functions/v1/analyze-asset', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${session.access_token}`,
+          'X-Gemini-Key': config.geminiApiKey,
         },
         body: JSON.stringify({
           asset: {
@@ -353,7 +362,7 @@ function SettingsContent() {
         </Card>
       </div>
 
-      {/* AI Compliance Configuration (Lovable AI) */}
+      {/* AI Compliance Configuration (Gemini) */}
       <Card className="glass-card">
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
@@ -361,20 +370,44 @@ function SettingsContent() {
             AI Compliance Analysis
           </CardTitle>
           <CardDescription>
-            Powered by Lovable AI Gateway - analyzes assets for advertising policy compliance across Google, TikTok, and Snapchat.
+            Powered by Google Gemini 2.5 Flash - analyzes assets for advertising policy compliance across Google, TikTok, and Snapchat.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
-          <div className="rounded-lg border border-success/20 bg-success/5 p-4">
-            <div className="flex items-start gap-3">
-              <CheckCircle2 className="h-5 w-5 text-success shrink-0 mt-0.5" />
-              <div>
-                <p className="font-medium text-foreground">Pre-configured & Ready</p>
-                <p className="text-sm text-muted-foreground mt-1">
-                  AI compliance analysis is automatically configured using Lovable AI Gateway. No API keys required.
-                </p>
-              </div>
+          <div className="space-y-2">
+            <Label htmlFor="geminiKey">Gemini API Key</Label>
+            <div className="relative">
+              <Key className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+              <Input
+                id="geminiKey"
+                type={showGeminiKey ? 'text' : 'password'}
+                placeholder="Enter your Google Gemini API key"
+                value={config.geminiApiKey}
+                onChange={(e) => setConfig(prev => ({ ...prev, geminiApiKey: e.target.value }))}
+                className="pl-10 pr-10 input-premium"
+              />
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                className="absolute right-1 top-1/2 h-7 w-7 -translate-y-1/2"
+                onClick={() => setShowGeminiKey(!showGeminiKey)}
+              >
+                {showGeminiKey ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+              </Button>
             </div>
+            <p className="text-xs text-muted-foreground">
+              Get your API key from{' '}
+              <a
+                href="https://aistudio.google.com/apikey"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-primary hover:underline inline-flex items-center gap-1"
+              >
+                Google AI Studio
+                <ExternalLink className="h-3 w-3" />
+              </a>
+            </p>
           </div>
 
           {/* Test Connection Button */}
@@ -382,7 +415,7 @@ function SettingsContent() {
             <Button
               variant="outline"
               onClick={testAiComplianceConnection}
-              disabled={connectionState.aiCompliance.status === 'testing'}
+              disabled={connectionState.aiCompliance.status === 'testing' || !config.geminiApiKey}
               className="gap-2 bg-white/5 border-white/10 hover:bg-white/10 hover:text-white transition-all"
             >
               {getStatusIcon(connectionState.aiCompliance.status)}

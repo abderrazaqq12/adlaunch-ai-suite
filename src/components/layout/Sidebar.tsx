@@ -1,4 +1,3 @@
-import { useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { cn } from '@/lib/utils';
 import {
@@ -21,6 +20,7 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from '@/components/ui/tooltip';
+import { useTheme } from '@/components/ThemeProvider';
 
 // UX Flow: Dashboard → Assets → Accounts → Publish → Execution → Monitoring → Recovery → Automation
 const navItems = [
@@ -46,6 +46,8 @@ interface SidebarProps {
 export function Sidebar({ isCollapsed, onToggle }: SidebarProps) {
   const location = useLocation();
   const { setUser, setIsApproved } = useProjectStore();
+  const { resolvedTheme } = useTheme();
+  const isDark = resolvedTheme === 'dark';
 
   const handleLogout = () => {
     setUser(null);
@@ -55,8 +57,13 @@ export function Sidebar({ isCollapsed, onToggle }: SidebarProps) {
   return (
     <aside
       className={cn(
-        "fixed left-0 top-0 z-40 h-screen border-r border-sidebar-border bg-sidebar-background/80 backdrop-blur-xl transition-all duration-300 supports-[backdrop-filter]:bg-sidebar-background/60",
-        isCollapsed ? "w-16" : "w-56"
+        "fixed left-0 top-0 z-40 h-screen transition-all duration-300",
+        isCollapsed ? "w-16" : "w-56",
+        // Light mode: Blue sidebar like AdPortal
+        // Dark mode: Dark with glass effect
+        isDark
+          ? "border-r border-sidebar-border bg-sidebar-background/80 backdrop-blur-xl"
+          : "bg-primary shadow-lg"
       )}
     >
       <div className="flex h-full flex-col py-4">
@@ -66,15 +73,30 @@ export function Sidebar({ isCollapsed, onToggle }: SidebarProps) {
           isCollapsed ? "justify-center px-2" : "justify-between px-4"
         )}>
           <div className="flex items-center gap-3">
-            <img src="/logo.png" alt="AdLaunch AI" className="h-10 w-10 rounded-xl flex-shrink-0 shadow-lg shadow-primary/20" />
+            <img
+              src="/logo.png"
+              alt="AdLaunch AI"
+              className={cn(
+                "h-10 w-10 rounded-xl flex-shrink-0",
+                isDark ? "shadow-lg shadow-primary/20" : "bg-white/20 p-1"
+              )}
+            />
             {!isCollapsed && (
-              <span className="text-lg font-bold text-foreground whitespace-nowrap tracking-tight">AdLaunch</span>
+              <span className={cn(
+                "text-lg font-bold whitespace-nowrap tracking-tight",
+                isDark ? "text-foreground" : "text-white"
+              )}>AdLaunch</span>
             )}
           </div>
           {!isCollapsed && (
             <button
               onClick={onToggle}
-              className="flex h-8 w-8 items-center justify-center rounded-lg text-muted-foreground hover:bg-white/5 hover:text-foreground transition-colors border border-transparent hover:border-white/5"
+              className={cn(
+                "flex h-8 w-8 items-center justify-center rounded-lg transition-colors",
+                isDark
+                  ? "text-muted-foreground hover:bg-white/5 hover:text-foreground"
+                  : "text-white/70 hover:bg-white/10 hover:text-white"
+              )}
             >
               <ChevronLeft className="h-4 w-4" />
             </button>
@@ -85,7 +107,12 @@ export function Sidebar({ isCollapsed, onToggle }: SidebarProps) {
         {isCollapsed && (
           <button
             onClick={onToggle}
-            className="mx-auto mb-4 flex h-8 w-8 items-center justify-center rounded-lg text-muted-foreground hover:bg-white/5 hover:text-foreground transition-colors border border-transparent hover:border-white/5"
+            className={cn(
+              "mx-auto mb-4 flex h-8 w-8 items-center justify-center rounded-lg transition-colors",
+              isDark
+                ? "text-muted-foreground hover:bg-white/5 hover:text-foreground"
+                : "text-white/70 hover:bg-white/10 hover:text-white"
+            )}
           >
             <ChevronRight className="h-4 w-4" />
           </button>
@@ -104,16 +131,23 @@ export function Sidebar({ isCollapsed, onToggle }: SidebarProps) {
                   'flex items-center gap-3 rounded-xl transition-all duration-300 group relative overflow-hidden',
                   isCollapsed ? 'h-10 w-10 justify-center' : 'h-10 px-3',
                   isActive
-                    ? 'bg-primary text-primary-foreground shadow-[0_0_15px_hsl(217,91%,60%,0.3)]'
-                    : 'text-muted-foreground hover:bg-white/[0.03] hover:text-foreground hover:shadow-inner'
+                    ? isDark
+                      ? 'bg-primary text-primary-foreground shadow-[0_0_15px_hsl(217,91%,60%,0.3)]'
+                      : 'bg-white text-primary font-semibold shadow-md'
+                    : isDark
+                      ? 'text-muted-foreground hover:bg-white/[0.03] hover:text-foreground'
+                      : 'text-white/80 hover:bg-white/10 hover:text-white'
                 )}
               >
-                {/* Active Indicator Glow */}
-                {isActive && (
+                {/* Active Indicator Glow - dark mode only */}
+                {isActive && isDark && (
                   <div className="absolute inset-0 bg-gradient-to-r from-white/20 to-transparent opacity-50 blur-sm" />
                 )}
 
-                <Icon className={cn("h-5 w-5 flex-shrink-0 relative z-10 transition-transform duration-300", isActive && "scale-110")} />
+                <Icon className={cn(
+                  "h-5 w-5 flex-shrink-0 relative z-10 transition-transform duration-300",
+                  isActive && "scale-110"
+                )} />
                 {!isCollapsed && (
                   <span className="text-sm font-medium relative z-10">{item.label}</span>
                 )}
@@ -126,7 +160,7 @@ export function Sidebar({ isCollapsed, onToggle }: SidebarProps) {
                   <TooltipTrigger asChild>
                     {linkContent}
                   </TooltipTrigger>
-                  <TooltipContent side="right" className="bg-popover border-white/10 text-popover-foreground shadow-xl">
+                  <TooltipContent side="right" className="bg-popover border-border text-popover-foreground shadow-xl">
                     {item.label}
                   </TooltipContent>
                 </Tooltip>
@@ -138,7 +172,11 @@ export function Sidebar({ isCollapsed, onToggle }: SidebarProps) {
         </nav>
 
         {/* Bottom nav items */}
-        <div className={cn("space-y-1 pt-4 border-t border-white/5", isCollapsed ? "px-2" : "px-3")}>
+        <div className={cn(
+          "space-y-1 pt-4",
+          isCollapsed ? "px-2" : "px-3",
+          isDark ? "border-t border-white/5" : "border-t border-white/20"
+        )}>
           {bottomNavItems.map((item) => {
             const isActive = location.pathname === item.path;
             const Icon = item.icon;
@@ -150,8 +188,12 @@ export function Sidebar({ isCollapsed, onToggle }: SidebarProps) {
                   'flex items-center gap-3 rounded-xl transition-all duration-300 group',
                   isCollapsed ? 'h-10 w-10 justify-center' : 'h-10 px-3',
                   isActive
-                    ? 'bg-primary text-primary-foreground shadow-[0_0_15px_hsl(217,91%,60%,0.3)]'
-                    : 'text-muted-foreground hover:bg-white/[0.03] hover:text-foreground'
+                    ? isDark
+                      ? 'bg-primary text-primary-foreground shadow-[0_0_15px_hsl(217,91%,60%,0.3)]'
+                      : 'bg-white text-primary font-semibold shadow-md'
+                    : isDark
+                      ? 'text-muted-foreground hover:bg-white/[0.03] hover:text-foreground'
+                      : 'text-white/80 hover:bg-white/10 hover:text-white'
                 )}
               >
                 <Icon className={cn("h-5 w-5 flex-shrink-0 transition-transform duration-300", isActive && "scale-110")} />
@@ -167,7 +209,7 @@ export function Sidebar({ isCollapsed, onToggle }: SidebarProps) {
                   <TooltipTrigger asChild>
                     {linkContent}
                   </TooltipTrigger>
-                  <TooltipContent side="right" className="bg-popover border-white/10 text-popover-foreground shadow-xl">
+                  <TooltipContent side="right" className="bg-popover border-border text-popover-foreground shadow-xl">
                     {item.label}
                   </TooltipContent>
                 </Tooltip>
@@ -183,19 +225,29 @@ export function Sidebar({ isCollapsed, onToggle }: SidebarProps) {
               <TooltipTrigger asChild>
                 <button
                   onClick={handleLogout}
-                  className="flex h-10 w-10 items-center justify-center rounded-xl text-muted-foreground hover:bg-destructive/10 hover:text-destructive transition-all duration-200"
+                  className={cn(
+                    "flex h-10 w-10 items-center justify-center rounded-xl transition-all duration-200",
+                    isDark
+                      ? "text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
+                      : "text-white/70 hover:bg-red-500/20 hover:text-white"
+                  )}
                 >
                   <LogOut className="h-5 w-5" />
                 </button>
               </TooltipTrigger>
-              <TooltipContent side="right" className="bg-popover border-white/10 text-popover-foreground shadow-xl">
+              <TooltipContent side="right" className="bg-popover border-border text-popover-foreground shadow-xl">
                 Logout
               </TooltipContent>
             </Tooltip>
           ) : (
             <button
               onClick={handleLogout}
-              className="flex h-10 w-full items-center gap-3 px-3 rounded-xl text-muted-foreground hover:bg-destructive/10 hover:text-destructive transition-all duration-200"
+              className={cn(
+                "flex h-10 w-full items-center gap-3 px-3 rounded-xl transition-all duration-200",
+                isDark
+                  ? "text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
+                  : "text-white/70 hover:bg-red-500/20 hover:text-white"
+              )}
             >
               <LogOut className="h-5 w-5 flex-shrink-0" />
               <span className="text-sm font-medium">Logout</span>
