@@ -205,4 +205,8 @@ app.post('/automation/profile/update', zValidator('json', profileUpdateSchema), 
 // --- OAuth Routes ---
 app.route('/oauth', oauthRoutes)
 
+// --- Settings Routes ---
+import settingsRoutes from './settings'
+app.route('/settings/api-keys', settingsRoutes)
+
 export default app

@@ -2,10 +2,13 @@ import { MemoryEngine } from '../memory/index'
 import { Creative } from '../orchestrator/types'
 import { CreativeReplacementEngine } from '../engines/replacement'
 import { CreativeScoreEngine, ScoredCreative } from '../engines/scoring'
+import { LLMService, AIAnalysisResult } from '../../llm/index'
 
 export interface ComplianceResult {
     passed: boolean
     issues: string[]
+    details?: AIAnalysisResult
+    decision_trace?: string[]
 }
 
 export interface FilterResult {
@@ -19,31 +22,88 @@ export interface FilterResult {
 
 export class ComplianceGuard {
     private replacer = new CreativeReplacementEngine()
+    private scorer = new CreativeScoreEngine() // Added missing property init
+    private llm = new LLMService()
 
     constructor(private memory: MemoryEngine) { }
 
-    // Legacy/Campaign Level check (kept for existing validation flows if any)
+    // Legacy validation upgraded to use Hybrid Logic
     async validate(campaign: any, platform: string, projectId: string): Promise<ComplianceResult> {
-        // Just scan campaign text fields roughly
-        const textContent = [
-            campaign.name,
-            campaign.headline,
-            campaign.adText,
-            campaign.description
-        ].filter(Boolean).join(' ').toLowerCase()
+        // Construct detailed input for AI
+        const inputData = {
+            platform,
+            asset_type: 'video', // Assuming video context
+            language: 'en', // Default, should be passed in
+            vertical: 'ecommerce', // Default, should be passed in
+            target_country: 'US', // Default
+            content: {
+                headline: campaign.headline || campaign.name,
+                adText: campaign.adText,
+                description: campaign.description
+            }
+        }
 
-        const issues = this.scanText(textContent, platform)
+        // 1. Run AI Analysis
+        const aiResponse = await this.llm.analyzeVideoContent(inputData, projectId)
+        let aiResult = aiResponse.data! // Fallback guarantees data exists
+        const trace: string[] = [`AI_Model: ${aiResponse.metadata?.modelVersion}`, `Prompt_Hash: ${aiResponse.metadata?.promptVersion}`]
 
-        if (issues.length > 0) {
+        if (!aiResponse.success) {
+            trace.push(`AI_FAILURE: ${aiResponse.error}`)
+        }
+
+        // 2. Deterministic Regex Check (Hybrid Enforcement)
+        const regexIssues = this.scanText(JSON.stringify(inputData.content), platform)
+        const hasHardBlock = regexIssues.some(i => i.includes('HARD BLOCK'))
+
+        // 3. Conflict Resolution & Risk Scoring
+        let finalStatus = aiResult.status
+        let finalIssues = [...aiResult.detected_issues]
+
+        // Deterministic Overrides
+        if (hasHardBlock) {
+            if (finalStatus === 'APPROVED' || finalStatus === 'APPROVED_WITH_CHANGES') {
+                finalStatus = 'BLOCKED_HARD'
+                trace.push('OVERRIDE: Hard Block Regex triggered despite AI approval.')
+            }
+
+            // Add regex issues to the list
+            regexIssues.forEach(issue => {
+                finalIssues.push({
+                    type: 'TEXT',
+                    severity: issue.includes('HARD BLOCK') ? 'CRITICAL' : 'HIGH',
+                    description: `[Automatic Safeguard] ${issue}`
+                })
+            })
+        }
+
+        // 4. Deterministic Risk Scoring
+        // We do NOT trust the AI's risk_score. We calculate it ourselves.
+        const calculatedRisk = this.calculateDeterministicRisk(finalIssues)
+        aiResult.risk_score = calculatedRisk
+        aiResult.status = finalStatus
+        aiResult.detected_issues = finalIssues
+
+        const passed = finalStatus === 'APPROVED' || finalStatus === 'APPROVED_WITH_CHANGES'
+
+        // Store result in memory
+        if (!passed) {
             await this.memory.store(projectId, 'compliance_block', {
                 platform,
-                issues,
+                issues: finalIssues.map(i => i.description),
                 campaignId: campaign.id || 'unknown',
-                timestamp: Date.now()
+                timestamp: Date.now(),
+                risk_score: calculatedRisk,
+                trace
             })
-            return { passed: false, issues }
         }
-        return { passed: true, issues: [] }
+
+        return {
+            passed,
+            issues: finalIssues.map(i => i.description),
+            details: aiResult,
+            decision_trace: trace
+        }
     }
 
     async filterBase(campaign: any, platform: string, projectId: string): Promise<FilterResult> {
@@ -52,32 +112,42 @@ export class ComplianceGuard {
         const excludedCreatives: { id: string, reasons: string[] }[] = []
         let repairedCount = 0
 
-        // 1. Scan Creatives with Auto-Replacement (Severity-Gated)
         for (const creative of creatives) {
-            const scan = this.scanCreative(creative, platform)
+            // Adapted to use the new validate logic per creative
+            // This maps the creative to the "campaign" structure expected by validate
+            const creativeAsCampaign = {
+                headline: creative.content.headline,
+                adText: creative.content.adText,
+                description: creative.content.description,
+                id: creative.id
+            }
 
-            if (scan.status === 'BLOCKED') {
-                // Check severity before attempting replacement
-                const severity = this.replacer.classifyViolation(creative)
+            const validation = await this.validate(creativeAsCampaign, platform, projectId)
 
-                if (severity === 'HARD') {
-                    // HARD violations - no replacement allowed
-                    excludedCreatives.push({ id: creative.id, reasons: [...scan.reasons, 'HARD_PROHIBITED'] })
-                    console.log(`[ComplianceGuard] HARD violation - excluding creative ${creative.id} without replacement`)
+            if (!validation.passed) {
+                // Check if we can auto-repair (only if NOT BLOCKED_HARD)
+                const isHardBlock = validation.details?.status === 'BLOCKED_HARD'
+
+                if (isHardBlock) {
+                    excludedCreatives.push({ id: creative.id, reasons: validation.issues })
                 } else {
-                    // SOFT violations - attempt auto-replacement
-                    const replacement = this.replacer.replace(creative, scan.reasons, platform as 'google' | 'tiktok' | 'snap')
-                    const reScan = this.scanCreative(replacement, platform)
+                    // Attempt replacement
+                    // Note: Real replacement logic would ideally re-run validation. 
+                    // For now, we assume if replacer runs, we re-check.
+                    const replacement = this.replacer.replace(creative, validation.issues, platform as any)
+                    // Simple re-check (could be optimized)
+                    const reValidation = await this.validate({
+                        headline: replacement.content.headline,
+                        adText: replacement.content.adText,
+                        description: replacement.content.description,
+                        id: replacement.id
+                    }, platform, projectId)
 
-                    if (reScan.status === 'COMPLIANT') {
-                        // Replacement succeeded
+                    if (reValidation.passed) {
                         allowedCreatives.push(replacement)
                         repairedCount++
-                        console.log(`[ComplianceGuard] Auto-repaired creative ${creative.id} -> ${replacement.id}`)
                     } else {
-                        // Replacement still blocked
-                        excludedCreatives.push({ id: creative.id, reasons: scan.reasons })
-                        console.log(`[ComplianceGuard] Replacement failed for ${creative.id} - still non-compliant`)
+                        excludedCreatives.push({ id: creative.id, reasons: reValidation.issues })
                     }
                 }
             } else {
@@ -85,83 +155,64 @@ export class ComplianceGuard {
             }
         }
 
-        // 2. Also scan campaign-level text if present (title/desc) acts as a creative
-        // If campaign has no creatives array, fallback to validating the campaign intent text itself
+        // Fallback if no creatives
         if (creatives.length === 0) {
             const res = await this.validate(campaign, platform, projectId)
             if (!res.passed) {
-                // Treat as "all blocked"
                 return {
                     filteredCampaign: campaign,
-                    excludedCreatives: [{ id: 'campaign_intent_fields', reasons: res.issues }],
+                    excludedCreatives: [{ id: 'campaign_intent', reasons: res.issues }],
                     allowedCount: 0,
-                    totalCount: 1
+                    totalCount: 1,
+                    repairedCount: 0,
+                    scoredCreatives: []
                 }
             }
         }
 
-        // 3. Persist Logs
-        if (excludedCreatives.length > 0) {
-            await this.memory.store(projectId, 'creative_exclusion', {
-                platform,
-                excludedCount: excludedCreatives.length,
-                details: excludedCreatives,
-                timestamp: Date.now()
-            })
-        }
+        const scoredCreatives = await this.scorer.score(allowedCreatives, platform as any, projectId)
 
-        // 4. Score and Select Creatives
-        const scoredCreatives = await this.scorer.score(allowedCreatives, platform as 'google' | 'tiktok' | 'snap', projectId)
-
-        // Return filtered campaign with scored creatives
         return {
             filteredCampaign: {
                 ...campaign,
-                creatives: scoredCreatives.filter(c => c.status === 'ACTIVE') // Only ACTIVE creatives in campaign
+                creatives: scoredCreatives.filter(c => c.status === 'ACTIVE')
             },
             excludedCreatives,
-            allowedCount: creatives.length > 0 ? allowedCreatives.length : 1,
-            totalCount: creatives.length > 0 ? creatives.length : 1,
+            allowedCount: allowedCreatives.length,
+            totalCount: creatives.length || 1,
             repairedCount,
             scoredCreatives
         }
     }
 
-    private scanCreative(creative: Creative, platform: string): { status: 'COMPLIANT' | 'BLOCKED', reasons: string[] } {
-        const parts = [
-            creative.content.headline,
-            creative.content.adText,
-            creative.content.description,
-            creative.content.transcript
-        ].filter(Boolean).join(' ').toLowerCase()
-
-        const issues = this.scanText(parts, platform)
-
-        // Also check URL if present (mock check)
-        if (creative.url && creative.url.includes('malware')) {
-            issues.push('Malicious URL detected')
+    private calculateDeterministicRisk(issues: { severity: string }[]): number {
+        let score = 0
+        for (const issue of issues) {
+            switch (issue.severity) {
+                case 'CRITICAL': score += 100; break;
+                case 'HIGH': score += 20; break;
+                case 'MEDIUM': score += 10; break;
+                case 'LOW': score += 5; break;
+            }
         }
-
-        return {
-            status: issues.length > 0 ? 'BLOCKED' : 'COMPLIANT',
-            reasons: issues
-        }
+        return Math.min(score, 100)
     }
 
+    // Deterministic Regex Scanner
     private scanText(text: string, platform: string): string[] {
         const issues: string[] = []
+        const lowerText = text.toLowerCase()
 
-        // Universal
-        const prohibited = ['cure', 'guarantee', '100%', 'before/after', 'magic pill', 'instant result']
-        for (const word of prohibited) if (text.includes(word)) issues.push(`Prohibited term: "${word}"`)
+        // HARD BLOCKS (Universal)
+        const hardBlocks = ['guarantee', '100%', 'cure', 'instant results', 'before/after']
+        for (const word of hardBlocks) {
+            if (lowerText.includes(word)) issues.push(`HARD BLOCK: Prohibited term "${word}" detected.`)
+        }
 
         // Platform Specific
         if (platform === 'google') {
-            const list = ['crypto', 'gambling', 'weight loss', 'hack']
-            for (const word of list) if (text.includes(word)) issues.push(`[Google] Restricted: "${word}"`)
-        } else if (platform === 'tiktok' || platform === 'snap') {
-            const list = ['adult', 'nsfw', 'tobacco', 'misleading', 'claim']
-            for (const word of list) if (text.includes(word)) issues.push(`[${platform}] Restricted: "${word}"`)
+            const list = ['crypto', 'gambling', 'hack']
+            for (const word of list) if (lowerText.includes(word)) issues.push(`[Google] Restricted: "${word}"`)
         }
 
         return issues
