@@ -226,30 +226,12 @@ function SettingsContent() {
     setIsSaving(true);
 
     try {
-      // Call backend API to save encrypted
-      const response = await fetch('/api/v1/settings/api-keys', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'X-Project-Id': 'demo-project', // TODO: Get from actual project context
-        },
-        body: JSON.stringify({
-          llm_provider: config.llmProvider,
-          llm_api_key: config.llmApiKey,
-          llm_model: config.llmModel,
-        }),
-      });
-
-      if (!response.ok) {
-        throw new Error('Failed to save API keys');
-      }
-
-      // Also keep in localStorage for backward compatibility
+      // Save to localStorage
       localStorage.setItem(STORAGE_KEY, JSON.stringify(config));
 
       toast({
         title: 'Settings Saved',
-        description: 'Your API configuration has been saved securely.',
+        description: 'Your API configuration has been saved.',
       });
     } catch (error) {
       toast({
@@ -263,7 +245,7 @@ function SettingsContent() {
   };
 
   const selectedProvider = LLM_PROVIDERS.find(p => p.value === config.llmProvider);
-  const isConfigured = config.brainApiUrl && config.brainApiToken;
+  const isConfigured = config.geminiApiKey;
   const isLlmConfigured = config.llmApiKey && config.llmModel;
 
   const getStatusIcon = (status: ConnectionStatus) => {
